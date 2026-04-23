@@ -11,6 +11,22 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # Pin @types/node to match the runtime engine (node 20). Type-only
+      # majors diverge from runtime types and are just noise for us.
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
+      # vitest 2/3/4 all shipped breaking changes. Treat as a deliberate
+      # code-migration, not an auto-bump.
+      - dependency-name: "vitest"
+        update-types:
+          - version-update:semver-major
+      # MCP SDK 0.x -> 1.x is a schema migration that needs server.ts
+      # changes. Suppress until the migration is scheduled.
+      - dependency-name: "@modelcontextprotocol/sdk"
+        update-types:
+          - version-update:semver-major
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
