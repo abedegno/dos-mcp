@@ -1,4 +1,5 @@
 import type { Backend } from "../backend";
+import { loadBundleTool, shutdownTool, waitTool } from "./session";
 
 export interface ToolDef {
   name: string;
@@ -7,5 +8,4 @@ export interface ToolDef {
   handler: (backend: Backend, args: unknown) => Promise<unknown>;
 }
 
-/** Registered at server startup. Tools added in later tasks. */
-export const tools: ToolDef[] = [];
+export const tools: ToolDef[] = [loadBundleTool, shutdownTool, waitTool];
