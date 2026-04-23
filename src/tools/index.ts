@@ -6,6 +6,7 @@ import {
   sendClickTool,
   moveMouseTool,
 } from "./input";
+import { screenshotTool, getStatusTool } from "./observe";
 
 export interface ToolDef {
   name: string;
@@ -22,4 +23,6 @@ export const tools: ToolDef[] = [
   sendKeySequenceTool,
   sendClickTool,
   moveMouseTool,
+  screenshotTool,
+  getStatusTool,
 ];

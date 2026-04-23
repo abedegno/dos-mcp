@@ -7,24 +7,24 @@ import { normalizeDosPath, splitDosPath } from "../paths";
  */
 export class FakeBackend implements Backend {
   private files: Map<string, Buffer> = new Map();
+  private running = false;
+  private sessionCounter = 0;
   public recordedKeys: string[] = [];
   public recordedKeySequences: string[][] = [];
   public recordedClicks: Array<{ x: number; y: number; button: string }> = [];
   public recordedMoves: Array<{ x: number; y: number }> = [];
 
-  async loadBundle(options: LoadBundleOptions): Promise<LoadBundleResult> {
+  async loadBundle(_options: LoadBundleOptions): Promise<LoadBundleResult> {
+    this.running = true;
+    this.sessionCounter++;
     return {
-      sessionId: `fake-session-${Date.now()}`,
+      sessionId: `fake-${this.sessionCounter}`,
       status: "ready",
     };
   }
 
   async shutdown(): Promise<void> {
-    this.files.clear();
-    this.recordedKeys = [];
-    this.recordedKeySequences = [];
-    this.recordedClicks = [];
-    this.recordedMoves = [];
+    this.running = false;
   }
 
   async wait(ms: number): Promise<void> {
@@ -56,7 +56,7 @@ export class FakeBackend implements Backend {
 
   async getStatus(): Promise<BackendStatus> {
     return {
-      running: false,
+      running: this.running,
       dosTimeMs: 0,
     };
   }
