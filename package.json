@@ -32,7 +32,7 @@
     "@types/yauzl": "^2.10.3",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
-    "eslint": "^9.0.0",
+    "eslint": "^10.2.1",
     "typescript": "^5.4.0",
     "typescript-eslint": "^8.0.0",
     "vitest": "^1.4.0"
