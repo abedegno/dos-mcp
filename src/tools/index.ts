@@ -7,6 +7,15 @@ import {
   moveMouseTool,
 } from "./input";
 import { screenshotTool, getStatusTool } from "./observe";
+import {
+  fsReadTool,
+  fsWriteTool,
+  fsListTool,
+  fsDeleteTool,
+  fsPushDirTool,
+  fsPullDirTool,
+  fsSyncTool,
+} from "./fs";
 
 export interface ToolDef {
   name: string;
@@ -25,4 +34,11 @@ export const tools: ToolDef[] = [
   moveMouseTool,
   screenshotTool,
   getStatusTool,
+  fsReadTool,
+  fsWriteTool,
+  fsListTool,
+  fsDeleteTool,
+  fsPushDirTool,
+  fsPullDirTool,
+  fsSyncTool,
 ];
