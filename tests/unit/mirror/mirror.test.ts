@@ -21,11 +21,14 @@ describe("MirrorTracker", () => {
     const m = new MirrorTracker();
     m.addMirror({ host: tmp, dos: "C:/SAVE1" });
     m.markDirty("C:/SAVE1/DESC", Buffer.from("desc"));
+    // Mirror mode uses DOS-canonical (uppercased) paths on the host side too,
+    // because normalizeDosPath uppercases "sub" -> "SUB" and that propagates.
+    // On case-sensitive hosts (Linux CI) the host path must match exactly.
     m.markDirty("C:/SAVE1/sub/FILE.DAT", Buffer.from([9, 9, 9]));
     const count = await m.flush();
     expect(count).toBe(2);
     expect(fs.readFileSync(path.join(tmp, "DESC")).toString()).toBe("desc");
-    expect(fs.readFileSync(path.join(tmp, "sub", "FILE.DAT"))).toEqual(Buffer.from([9, 9, 9]));
+    expect(fs.readFileSync(path.join(tmp, "SUB", "FILE.DAT"))).toEqual(Buffer.from([9, 9, 9]));
     expect(m.pendingCount()).toBe(0);
   });
 
