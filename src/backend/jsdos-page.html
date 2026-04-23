@@ -5,43 +5,95 @@
   <title>dos-mcp</title>
   <style>
     html, body { margin: 0; padding: 0; background: #000; }
-    #dos { width: 640px; height: 400px; display: block; }
-    canvas { display: block; image-rendering: pixelated; }
+    #dos { width: 640px; height: 400px; display: block; position: relative; }
+    canvas {
+      display: block;
+      image-rendering: pixelated;
+      width: 640px;
+      height: 400px;
+      outline: none;
+    }
   </style>
 </head>
 <body>
-  <div id="dos"><canvas id="canvas" width="640" height="400"></canvas></div>
+  <div id="dos"><canvas id="canvas" tabindex="0" width="640" height="400"></canvas></div>
   <!--
-    emulators v8.3.x — low-level emulators package from the js-dos ecosystem.
-    Exposes window.emulators with dosboxDirect(), fsReadFile(), fsWriteFile(),
-    fsTree(), fsDeleteFile(), exit(), etc.
-
-    The HTML sets up a canvas renderer that subscribes to ci's frame events
-    as soon as jsdos.ts stores the CI handle on window.__dosmcp.ci.
-    Puppeteer's page.screenshot() then sees the rendered DOS output.
-
-    Frame events deliver (rgb, rgba) where one is always null. DOSBox-direct
-    populates rgb (3 bytes/pixel) — we expand to RGBA for ImageData.
-    Frame size comes from ci.frameWidth / ci.frameHeight (data fields), NOT
-    ci.width() / ci.height() (those are methods and reading them without ()
-    yields a truthy function reference, which broke ImageData construction).
+    emulators v8.3.x — headless engine; we attach our own DOM bridges:
+    - Canvas renderer subscribed to ci.events().onFrame (RGB → RGBA).
+    - Keyboard bridge: document keydown/keyup → ci.sendKeyEvent with a
+      domKeyCode → GLFW keycode map lifted from caiiiycuk/js-dos
+      (src/window/dos/controls/keys.ts). These are NOT DOSBox scancodes —
+      emulators-v8 expects GLFW-style codes.
+    - Mouse bridge: canvas mousedown/mouseup/mousemove → ci.sendMouseMotion
+      and ci.sendMouseButton with 0..1 normalized coords derived from the
+      canvas's bounding rect.
+    Frame size is sourced from ci.frameWidth / ci.frameHeight (data fields,
+    not methods) so the drawing buffer stays pixel-perfect while CSS scales
+    the canvas up to the full viewport.
   -->
   <script src="https://v8.js-dos.com/latest/emulators/emulators.js"></script>
   <script>
+    // GLFW keycode constants used by emulators-v8.
+    const KBD_esc = 256, KBD_enter = 257, KBD_tab = 258, KBD_backspace = 259,
+      KBD_insert = 260, KBD_delete = 261, KBD_right = 262, KBD_left = 263,
+      KBD_down = 264, KBD_up = 265, KBD_pageup = 266, KBD_pagedown = 267,
+      KBD_home = 268, KBD_end = 269, KBD_capslock = 280, KBD_scrolllock = 281,
+      KBD_numlock = 282, KBD_printscreen = 283, KBD_pause = 284,
+      KBD_f1 = 290, KBD_f2 = 291, KBD_f3 = 292, KBD_f4 = 293, KBD_f5 = 294,
+      KBD_f6 = 295, KBD_f7 = 296, KBD_f8 = 297, KBD_f9 = 298, KBD_f10 = 299,
+      KBD_f11 = 300, KBD_f12 = 301,
+      KBD_kp0 = 320, KBD_kp1 = 321, KBD_kp2 = 322, KBD_kp3 = 323, KBD_kp4 = 324,
+      KBD_kp5 = 325, KBD_kp6 = 326, KBD_kp7 = 327, KBD_kp8 = 328, KBD_kp9 = 329,
+      KBD_kpmultiply = 332, KBD_kpdivide = 331,
+      KBD_leftshift = 340, KBD_leftctrl = 341, KBD_leftalt = 342,
+      KBD_rightshift = 344, KBD_rightctrl = 345, KBD_rightalt = 346,
+      KBD_a = 65;
+
+    const domKeyToDosKeyCodes = {
+      8: KBD_backspace, 9: KBD_tab, 13: KBD_enter, 16: KBD_leftshift,
+      17: KBD_leftctrl, 18: KBD_leftalt, 19: KBD_pause, 27: KBD_esc,
+      32: 32 /* KBD_space */, 33: KBD_pageup, 34: KBD_pagedown,
+      35: KBD_end, 36: KBD_home, 37: KBD_left, 38: KBD_up,
+      39: KBD_right, 40: KBD_down, 45: KBD_insert, 46: KBD_delete,
+      48: 48, 49: 49, 50: 50, 51: 51, 52: 52, 53: 53, 54: 54, 55: 55, 56: 56, 57: 57,
+      59: 59, 64: 61,
+      65: 65, 66: 66, 67: 67, 68: 68, 69: 69, 70: 70, 71: 71, 72: 72, 73: 73, 74: 74,
+      75: 75, 76: 76, 77: 77, 78: 78, 79: 79, 80: 80, 81: 81, 82: 82, 83: 83, 84: 84,
+      85: 85, 86: 86, 87: 87, 88: 88, 89: 89, 90: 90,
+      91: 91, 93: 93,
+      96: KBD_kp0, 97: KBD_kp1, 98: KBD_kp2, 99: KBD_kp3, 100: KBD_kp4,
+      101: KBD_kp5, 102: KBD_kp6, 103: KBD_kp7, 104: KBD_kp8, 105: KBD_kp9,
+      106: KBD_kpmultiply, 111: KBD_kpdivide,
+      112: KBD_f1, 113: KBD_f2, 114: KBD_f3, 115: KBD_f4, 116: KBD_f5, 117: KBD_f6,
+      118: KBD_f7, 119: KBD_f8, 120: KBD_f9, 121: KBD_f10, 122: KBD_f11, 123: KBD_f12,
+      144: KBD_numlock, 145: KBD_scrolllock,
+      173: 45 /* minus */, 186: 59, 187: 61, 188: 44, 189: 45, 190: 46, 191: 47,
+      192: 96, 219: 91, 220: 92, 221: 93, 222: 39,
+    };
+    const locationalKeys = {
+      16: { 1: KBD_leftshift, 2: KBD_rightshift },
+      17: { 1: KBD_leftctrl, 2: KBD_rightctrl },
+      18: { 1: KBD_leftalt, 2: KBD_rightalt },
+    };
+    const domToKeyCode = (domKey, loc) =>
+      (locationalKeys[domKey] && locationalKeys[domKey][loc]) ||
+      domKeyToDosKeyCodes[domKey] || 0;
+
     window.__dosmcp = {
       _ci: null,
       get ci() { return this._ci; },
       set ci(value) {
         this._ci = value;
-        if (value) attachRenderer(value);
+        if (value) attachBridges(value);
       },
       ready: false,
     };
 
-    function attachRenderer(ci) {
+    function attachBridges(ci) {
       const canvas = document.getElementById("canvas");
       const ctx = canvas.getContext("2d");
 
+      // --- renderer -------------------------------------------------------
       const drawFrame = (rgb, rgba) => {
         const w = ci.frameWidth || 640;
         const h = ci.frameHeight || 400;
@@ -77,9 +129,58 @@
         events.onFrame(drawFrame);
       } else if (typeof ci.onFrame === "function") {
         ci.onFrame(drawFrame);
-      } else {
-        console.warn("[dos-mcp] no frame-event API on ci — no rendering");
       }
+
+      // --- keyboard bridge -------------------------------------------------
+      // Bind at document level so Puppeteer's top-level keyboard.press works
+      // regardless of which element has focus.
+      const pressed = new Set();
+      document.addEventListener("keydown", (e) => {
+        const code = domToKeyCode(e.keyCode, e.location);
+        if (!code) return;
+        ci.sendKeyEvent(code, true);
+        pressed.add(code);
+        e.preventDefault();
+      });
+      document.addEventListener("keyup", (e) => {
+        const code = domToKeyCode(e.keyCode, e.location);
+        if (!code) return;
+        ci.sendKeyEvent(code, false);
+        pressed.delete(code);
+        e.preventDefault();
+      });
+      window.addEventListener("blur", () => {
+        for (const c of pressed) ci.sendKeyEvent(c, false);
+        pressed.clear();
+      });
+
+      // --- mouse bridge ----------------------------------------------------
+      // ci.sendMouseMotion accepts normalized 0..1 coords derived from the
+      // canvas's client rect (so CSS upscaling doesn't break aiming).
+      function normXY(ev) {
+        const r = canvas.getBoundingClientRect();
+        const x = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+        const y = Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height));
+        return { x, y };
+      }
+      canvas.addEventListener("mousemove", (ev) => {
+        const { x, y } = normXY(ev);
+        ci.sendMouseMotion(x, y);
+      });
+      canvas.addEventListener("mousedown", (ev) => {
+        const { x, y } = normXY(ev);
+        ci.sendMouseMotion(x, y);
+        ci.sendMouseButton(ev.button === 2 ? 1 : 0, true);
+        ev.preventDefault();
+      });
+      canvas.addEventListener("mouseup", (ev) => {
+        const { x, y } = normXY(ev);
+        ci.sendMouseMotion(x, y);
+        ci.sendMouseButton(ev.button === 2 ? 1 : 0, false);
+        ev.preventDefault();
+      });
+      // Suppress the context menu so right-click reaches DOSBox.
+      canvas.addEventListener("contextmenu", (ev) => ev.preventDefault());
     }
 
     window.addEventListener("load", function () {
