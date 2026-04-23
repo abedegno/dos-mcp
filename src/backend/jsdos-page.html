@@ -11,17 +11,31 @@
 <body>
   <div id="dos"></div>
   <!--
-    js-dos v8.3.x — emulators object is exposed to window by js-dos.js.
-    The full CommandInterface API lives in the `emulators` npm package (v8.3.9).
-    CDN URL: https://v8.js-dos.com/latest/js-dos.js
-    We do NOT call Dos(element, ...) here; instead we drive the emulator
-    programmatically via page.evaluate() in JsDosBackend.
+    emulators v8.3.x — the low-level emulators package from the js-dos ecosystem.
+    This exposes window.emulators with dosboxDirect(), fsReadFile(), fsWriteFile(),
+    fsTree(), fsDeleteFile(), exit(), etc.
+
+    We load emulators.js directly (not js-dos.js) because:
+    - js-dos.js is a React UI wrapper; it loads emulators.js lazily via document.write
+      only once the user clicks "Play", so window.emulators is NOT available immediately
+      after js-dos.js loads.
+    - emulators.js sets window.emulators synchronously and provides the full
+      CommandInterface API we need to drive DOS programmatically.
+
+    CDN: https://v8.js-dos.com/latest/emulators/emulators.js
   -->
-  <script src="https://v8.js-dos.com/latest/js-dos.js"></script>
+  <script src="https://v8.js-dos.com/latest/emulators/emulators.js"></script>
   <script>
-    // js-dos.js exposes `emulators` as a global (window.emulators).
-    // Store it under __dosmcp for our CDP calls.
-    window.__dosmcp = { emulators: window.emulators, ci: null };
+    // emulators.js sets window.emulators synchronously.
+    // Set pathPrefix so it can find wdosbox.js + WASM assets from the same CDN path.
+    window.__dosmcp = { ci: null };
+    window.addEventListener('load', function() {
+      if (window.emulators) {
+        window.emulators.pathPrefix = 'https://v8.js-dos.com/latest/emulators/';
+        window.__dosmcp.emulators = window.emulators;
+        window.__dosmcp.ready = true;
+      }
+    });
   </script>
 </body>
 </html>

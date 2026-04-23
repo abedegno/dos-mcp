@@ -98,7 +98,14 @@ export class JsDosBackend implements Backend {
     // 3. Launch Chromium + load the js-dos host page.
     this.browser = await puppeteer.launch({
       headless: this.opts.headless,
-      args: ["--no-sandbox", "--disable-dev-shm-usage"],
+      args: [
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        // dosboxDirect uses SharedArrayBuffer for sync Atomics across the WASM
+        // worker.  Without this flag headless Chromium may disable SAB on
+        // non-cross-origin-isolated pages (i.e. file:// URLs).
+        "--enable-features=SharedArrayBuffer",
+      ],
     });
     this.page = await this.browser.newPage();
     await this.page.setViewport({ width: 640, height: 400 });
@@ -106,9 +113,12 @@ export class JsDosBackend implements Backend {
     const htmlPath = path.join(__dirname, "jsdos-page.html");
     await this.page.goto("file://" + htmlPath);
 
-    // Wait until js-dos.js has loaded and set window.emulators
+    // Wait until emulators.js has loaded and the load-event handler has set
+    // window.__dosmcp.ready.  (emulators.js sets window.emulators synchronously
+    // but we wait for the 'load' event in the page script to also set pathPrefix
+    // before we start using the API.)
     await this.page.waitForFunction(
-      () => Boolean((window as any).__dosmcp?.emulators),
+      () => Boolean((window as any).__dosmcp?.ready),
       { timeout: 30_000 }
     );
 
