@@ -8,13 +8,12 @@ import {
 import { parseArgs } from "./config.js";
 import { tools } from "./tools/index.js";
 import type { Backend } from "./backend/index.js";
+import { JsDosBackend } from "./backend/jsdos.js";
 
 async function main() {
   const config = parseArgs(process.argv.slice(2));
 
   let backend: Backend | undefined;
-  const _ = config;
-  void _;
 
   const server = new Server(
     { name: "dos-mcp", version: "0.1.0" },
@@ -33,7 +32,12 @@ async function main() {
     const name = req.params.name;
     const tool = tools.find(t => t.name === name);
     if (!tool) throw new Error(`unknown tool: ${name}`);
-    if (!backend) throw new Error("backend not initialised; call load_bundle first");
+    if (!backend) {
+      if (name !== "load_bundle") {
+        throw new Error("backend not initialised; call load_bundle first");
+      }
+      backend = new JsDosBackend({ headless: !config.attended });
+    }
     const result = await tool.handler(backend, req.params.arguments ?? {});
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
   });

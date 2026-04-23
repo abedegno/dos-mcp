@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>dos-mcp</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #000; }
+    #dos { width: 640px; height: 400px; }
+  </style>
+</head>
+<body>
+  <div id="dos"></div>
+  <!--
+    js-dos v8.3.x — emulators object is exposed to window by js-dos.js.
+    The full CommandInterface API lives in the `emulators` npm package (v8.3.9).
+    CDN URL: https://v8.js-dos.com/latest/js-dos.js
+    We do NOT call Dos(element, ...) here; instead we drive the emulator
+    programmatically via page.evaluate() in JsDosBackend.
+  -->
+  <script src="https://v8.js-dos.com/latest/js-dos.js"></script>
+  <script>
+    // js-dos.js exposes `emulators` as a global (window.emulators).
+    // Store it under __dosmcp for our CDP calls.
+    window.__dosmcp = { emulators: window.emulators, ci: null };
+  </script>
+</body>
+</html>
