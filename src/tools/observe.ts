@@ -1,17 +1,28 @@
+import { writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { Backend } from "../backend/index.js";
 import type { ToolDef } from "./index.js";
 
 export const screenshotTool: ToolDef = {
   name: "screenshot",
-  description: "Capture the current emulator frame as an image (PNG by default).",
+  description:
+    "Capture the current emulator frame as an image. By default returns the PNG bytes as base64. If host_path is set, writes the image to that absolute path on disk and returns only the path + byte count (useful when the image is too large to shuttle through the tool channel).",
   inputSchema: {
     type: "object",
-    properties: { format: { type: "string", enum: ["png", "jpeg"] } },
+    properties: {
+      format: { type: "string", enum: ["png", "jpeg"] },
+      host_path: { type: "string" },
+    },
   },
   async handler(backend: Backend, args: unknown) {
-    const a = args as { format?: unknown };
+    const a = args as { format?: unknown; host_path?: unknown };
     const format = a.format === "jpeg" ? "jpeg" : "png";
     const shot = await backend.screenshot(format);
+    if (typeof a.host_path === "string" && a.host_path.length > 0) {
+      const abs = resolve(a.host_path);
+      writeFileSync(abs, shot.bytes);
+      return { path: abs, bytes: shot.bytes.length, mime: shot.mime };
+    }
     return { image_base64: shot.bytes.toString("base64"), mime: shot.mime };
   },
 };
