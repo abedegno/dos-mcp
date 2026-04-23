@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import yauzl from "yauzl";
-import { normalizeDosPath } from "../paths";
+import { normalizeDosPath } from "../paths.js";
 
 const openZip = promisify<string, yauzl.Options, yauzl.ZipFile>(yauzl.open);
 

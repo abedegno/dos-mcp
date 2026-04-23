@@ -1,5 +1,5 @@
-import type { Backend } from "../backend";
-import type { ToolDef } from "./index";
+import type { Backend } from "../backend/index.js";
+import type { ToolDef } from "./index.js";
 
 export const loadBundleTool: ToolDef = {
   name: "load_bundle",

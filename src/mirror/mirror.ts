@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { normalizeDosPath } from "../paths";
+import { normalizeDosPath } from "../paths.js";
 
 export interface MirrorSpec {
   host: string;

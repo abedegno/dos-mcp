@@ -1,12 +1,12 @@
-import type { Backend } from "../backend";
-import { loadBundleTool, shutdownTool, waitTool } from "./session";
+import type { Backend } from "../backend/index.js";
+import { loadBundleTool, shutdownTool, waitTool } from "./session.js";
 import {
   sendKeysTool,
   sendKeySequenceTool,
   sendClickTool,
   moveMouseTool,
-} from "./input";
-import { screenshotTool, getStatusTool } from "./observe";
+} from "./input.js";
+import { screenshotTool, getStatusTool } from "./observe.js";
 import {
   fsReadTool,
   fsWriteTool,
@@ -15,7 +15,7 @@ import {
   fsPushDirTool,
   fsPullDirTool,
   fsSyncTool,
-} from "./fs";
+} from "./fs.js";
 
 export interface ToolDef {
   name: string;

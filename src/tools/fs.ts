@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Backend } from "../backend";
-import type { ToolDef } from "./index";
-import { normalizeDosPath } from "../paths";
+import type { Backend } from "../backend/index.js";
+import type { ToolDef } from "./index.js";
+import { normalizeDosPath } from "../paths.js";
 
 function requireString(v: unknown, name: string): string {
   if (typeof v !== "string") throw new Error(`${name} (string) required`);

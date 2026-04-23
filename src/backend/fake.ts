@@ -1,5 +1,5 @@
-import { Backend, LoadBundleOptions, LoadBundleResult, BackendStatus, FsEntry } from "./index";
-import { normalizeDosPath } from "../paths";
+import { Backend, LoadBundleOptions, LoadBundleResult, BackendStatus, FsEntry } from "./index.js";
+import { normalizeDosPath } from "../paths.js";
 
 /**
  * In-memory fake backend for unit tests.
