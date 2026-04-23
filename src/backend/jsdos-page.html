@@ -5,33 +5,86 @@
   <title>dos-mcp</title>
   <style>
     html, body { margin: 0; padding: 0; background: #000; }
-    #dos { width: 640px; height: 400px; }
+    #dos { width: 640px; height: 400px; display: block; }
+    canvas { display: block; image-rendering: pixelated; }
   </style>
 </head>
 <body>
-  <div id="dos"></div>
+  <div id="dos"><canvas id="canvas" width="640" height="400"></canvas></div>
   <!--
-    emulators v8.3.x — the low-level emulators package from the js-dos ecosystem.
-    This exposes window.emulators with dosboxDirect(), fsReadFile(), fsWriteFile(),
+    emulators v8.3.x — low-level emulators package from the js-dos ecosystem.
+    Exposes window.emulators with dosboxDirect(), fsReadFile(), fsWriteFile(),
     fsTree(), fsDeleteFile(), exit(), etc.
 
-    We load emulators.js directly (not js-dos.js) because:
-    - js-dos.js is a React UI wrapper; it loads emulators.js lazily via document.write
-      only once the user clicks "Play", so window.emulators is NOT available immediately
-      after js-dos.js loads.
-    - emulators.js sets window.emulators synchronously and provides the full
-      CommandInterface API we need to drive DOS programmatically.
+    The HTML sets up a canvas renderer that subscribes to ci's frame events
+    as soon as jsdos.ts stores the CI handle on window.__dosmcp.ci.
+    Puppeteer's page.screenshot() then sees the rendered DOS output.
 
-    CDN: https://v8.js-dos.com/latest/emulators/emulators.js
+    Frame events deliver (rgb, rgba) where one is always null. DOSBox-direct
+    populates rgb (3 bytes/pixel) — we expand to RGBA for ImageData.
+    Frame size comes from ci.frameWidth / ci.frameHeight (data fields), NOT
+    ci.width() / ci.height() (those are methods and reading them without ()
+    yields a truthy function reference, which broke ImageData construction).
   -->
   <script src="https://v8.js-dos.com/latest/emulators/emulators.js"></script>
   <script>
-    // emulators.js sets window.emulators synchronously.
-    // Set pathPrefix so it can find wdosbox.js + WASM assets from the same CDN path.
-    window.__dosmcp = { ci: null };
-    window.addEventListener('load', function() {
+    window.__dosmcp = {
+      _ci: null,
+      get ci() { return this._ci; },
+      set ci(value) {
+        this._ci = value;
+        if (value) attachRenderer(value);
+      },
+      ready: false,
+    };
+
+    function attachRenderer(ci) {
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+
+      const drawFrame = (rgb, rgba) => {
+        const w = ci.frameWidth || 640;
+        const h = ci.frameHeight || 400;
+        const data = rgba || rgb;
+        if (!data) return;
+        let rgbaData;
+        if (data.length === w * h * 4) {
+          rgbaData = new Uint8ClampedArray(data);
+        } else if (data.length === w * h * 3) {
+          rgbaData = new Uint8ClampedArray(w * h * 4);
+          for (let i = 0, j = 0; i < data.length; i += 3, j += 4) {
+            rgbaData[j] = data[i];
+            rgbaData[j + 1] = data[i + 1];
+            rgbaData[j + 2] = data[i + 2];
+            rgbaData[j + 3] = 255;
+          }
+        } else {
+          return;
+        }
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        try {
+          ctx.putImageData(new ImageData(rgbaData, w, h), 0, 0);
+        } catch (err) {
+          console.error("[dos-mcp] frame draw failed:", err);
+        }
+      };
+
+      const events = typeof ci.events === "function" ? ci.events() : ci.events;
+      if (events && typeof events.onFrame === "function") {
+        events.onFrame(drawFrame);
+      } else if (typeof ci.onFrame === "function") {
+        ci.onFrame(drawFrame);
+      } else {
+        console.warn("[dos-mcp] no frame-event API on ci — no rendering");
+      }
+    }
+
+    window.addEventListener("load", function () {
       if (window.emulators) {
-        window.emulators.pathPrefix = 'https://v8.js-dos.com/latest/emulators/';
+        window.emulators.pathPrefix = "https://v8.js-dos.com/latest/emulators/";
         window.__dosmcp.emulators = window.emulators;
         window.__dosmcp.ready = true;
       }

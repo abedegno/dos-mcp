@@ -14,7 +14,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run copy-assets",
+    "copy-assets": "node -e \"require('node:fs').cpSync('src/backend/jsdos-page.html', 'dist/backend/jsdos-page.html')\"",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
