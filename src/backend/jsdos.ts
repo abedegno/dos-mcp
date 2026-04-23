@@ -23,7 +23,6 @@
  *   5. __dirname via path.dirname(fileURLToPath(import.meta.url)) — ES modules.
  */
 
-import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import puppeteer, { Browser, Page } from "puppeteer";

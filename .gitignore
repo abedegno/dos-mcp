@@ -4,3 +4,6 @@ dist/
 .DS_Store
 coverage/
 .vitest-cache/
+
+# Planning / workflow artifacts live in a sibling directory, not in the repo.
+docs/superpowers/

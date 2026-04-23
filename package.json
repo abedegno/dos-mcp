@@ -7,6 +7,12 @@
   "bin": {
     "dos-mcp": "dist/server.js"
   },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -24,15 +30,35 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/yauzl": "^2.10.3",
-    "typescript": "^5.4.0",
-    "vitest": "^1.4.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
-    "@typescript-eslint/eslint-plugin": "^7.5.0",
-    "@typescript-eslint/parser": "^7.5.0"
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^1.4.0"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "license": "MIT",
-  "keywords": ["mcp", "dos", "dosbox", "js-dos", "emulator", "retro"]
+  "author": "Jon Williams <jon@jonwilliams.org.uk>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/abedegno/dos-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/abedegno/dos-mcp/issues"
+  },
+  "homepage": "https://github.com/abedegno/dos-mcp#readme",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "dos",
+    "dosbox",
+    "js-dos",
+    "emulator",
+    "retro",
+    "ai-tools",
+    "agent"
+  ]
 }

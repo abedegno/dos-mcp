@@ -1,5 +1,5 @@
 import { Backend, LoadBundleOptions, LoadBundleResult, BackendStatus, FsEntry } from "./index";
-import { normalizeDosPath, splitDosPath } from "../paths";
+import { normalizeDosPath } from "../paths";
 
 /**
  * In-memory fake backend for unit tests.
@@ -31,7 +31,7 @@ export class FakeBackend implements Backend {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  async sendKeys(text: string, keyDelayMs?: number): Promise<void> {
+  async sendKeys(text: string, _keyDelayMs?: number): Promise<void> {
     this.recordedKeys.push(text);
   }
 
@@ -77,7 +77,6 @@ export class FakeBackend implements Backend {
 
   async fsList(dosPath: string): Promise<FsEntry[]> {
     const canonical = normalizeDosPath(dosPath);
-    const { drive, segments } = splitDosPath(canonical);
 
     // Collect all files at the listed directory
     const prefix = canonical.endsWith("/") ? canonical : canonical + "/";
