@@ -1,4 +1,4 @@
-import { Backend, LoadBundleOptions, LoadBundleResult, BackendStatus, FsEntry } from "./index.js";
+import { Backend, LoadBundleOptions, LoadBundleResult, BackendStatus, FsEntry, FsStat } from "./index.js";
 import { normalizeDosPath } from "../paths.js";
 
 /**
@@ -112,6 +112,27 @@ export class FakeBackend implements Backend {
     }
 
     return Array.from(entries.values());
+  }
+
+  async fsStat(dosPath: string): Promise<FsStat | null> {
+    const canonical = normalizeDosPath(dosPath);
+    const data = this.files.get(canonical);
+    if (data) {
+      const name = canonical.split("/").filter(Boolean).pop() ?? "";
+      return { name, size: data.length, isDir: false, childCount: 0 };
+    }
+    // Treat as dir if any file lives under it.
+    const prefix = canonical.endsWith("/") ? canonical : canonical + "/";
+    const direct = new Set<string>();
+    for (const p of this.files.keys()) {
+      if (!p.startsWith(prefix)) continue;
+      const rel = p.slice(prefix.length);
+      if (!rel) continue;
+      direct.add(rel.split("/")[0]);
+    }
+    if (direct.size === 0 && canonical !== "/") return null;
+    const name = canonical.split("/").filter(Boolean).pop() ?? "";
+    return { name, size: 0, isDir: true, childCount: direct.size };
   }
 
   async fsDelete(dosPath: string): Promise<void> {

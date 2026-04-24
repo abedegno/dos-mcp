@@ -59,6 +59,28 @@ export const fsListTool: ToolDef = {
   },
 };
 
+export const fsStatTool: ToolDef = {
+  name: "fs_stat",
+  description: "Stat a single path in the virtual DOS FS. Cheaper than fs_list when you only need to check existence, size, or whether a path is a directory. Returns null if the path does not exist.",
+  inputSchema: {
+    type: "object",
+    required: ["dos_path"],
+    properties: { dos_path: { type: "string" } },
+  },
+  async handler(backend: Backend, args: unknown) {
+    const p = requireString((args as any).dos_path, "dos_path");
+    const s = await backend.fsStat(p);
+    if (!s) return { exists: false };
+    return {
+      exists: true,
+      name: s.name,
+      size: s.size,
+      is_dir: s.isDir,
+      child_count: s.childCount,
+    };
+  },
+};
+
 export const fsDeleteTool: ToolDef = {
   name: "fs_delete",
   description: "Delete a file or empty dir from the virtual DOS FS.",

@@ -30,6 +30,7 @@ import type {
   Backend,
   BackendStatus,
   FsEntry,
+  FsStat,
   LoadBundleOptions,
   LoadBundleResult,
 } from "./index.js";
@@ -42,33 +43,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface JsDosBackendOptions {
   headless: boolean;
-}
-
-/** Represents a js-dos FsNode from ci.fsTree() */
-interface FsNode {
-  name: string;
-  size: number | null;
-  nodes: FsNode[] | null;
-}
-
-/**
- * Walk an FsNode tree to find the subtree rooted at `unixPath`.
- * The root node itself has name "" (empty) or the drive name;
- * we match path segments one at a time.
- */
-function findNode(root: FsNode, unixPath: string): FsNode | null {
-  // Normalise: strip leading slash, split
-  const segments = unixPath.replace(/^\/+/, "").split("/").filter(Boolean);
-  let current: FsNode = root;
-  for (const seg of segments) {
-    if (!current.nodes) return null;
-    const child = current.nodes.find(
-      n => n.name.toUpperCase() === seg.toUpperCase()
-    );
-    if (!child) return null;
-    current = child;
-  }
-  return current;
 }
 
 export class JsDosBackend implements Backend {
@@ -280,22 +254,52 @@ export class JsDosBackend implements Backend {
     if (!this.page) throw new Error("not loaded");
     const unix = dosPathToUnix(dosPath);
 
-    // ci.fsTree() returns the full tree; walk to the requested node.
-    // Plan used ci.fsReadDir(p) which does not exist in the real API.
-    const tree = await this.page.evaluate(async () => {
+    // ci.fsTree() returns the whole FS. Serializing it back across the
+    // Puppeteer bridge on every call was the source of fs_list timeouts on
+    // large trees. Do the walk inside the browser and only return the direct
+    // children of the requested node.
+    return await this.page.evaluate(async (target: string) => {
       const ci = (window as any).__dosmcp.ci;
-      return await ci.fsTree();
-    }) as FsNode;
+      const tree = await ci.fsTree();
+      const segs = target.replace(/^\/+/, "").split("/").filter(Boolean);
+      let cur: any = tree;
+      for (const s of segs) {
+        if (!cur?.nodes) return [];
+        const c = cur.nodes.find((n: any) => n.name.toUpperCase() === s.toUpperCase());
+        if (!c) return [];
+        cur = c;
+      }
+      const children = cur.nodes ?? [];
+      return children.map((n: any) => ({
+        name: n.name,
+        size: n.size ?? 0,
+        isDir: Array.isArray(n.nodes),
+      }));
+    }, unix) as FsEntry[];
+  }
 
-    const node = findNode(tree, unix);
-    if (!node) return [];
-
-    const children = node.nodes ?? [];
-    return children.map(n => ({
-      name: n.name,
-      size: n.size ?? 0,
-      isDir: Array.isArray(n.nodes),
-    }));
+  async fsStat(dosPath: string): Promise<FsStat | null> {
+    if (!this.page) throw new Error("not loaded");
+    const unix = dosPathToUnix(dosPath);
+    return await this.page.evaluate(async (target: string) => {
+      const ci = (window as any).__dosmcp.ci;
+      const tree = await ci.fsTree();
+      const segs = target.replace(/^\/+/, "").split("/").filter(Boolean);
+      let cur: any = tree;
+      for (const s of segs) {
+        if (!cur?.nodes) return null;
+        const c = cur.nodes.find((n: any) => n.name.toUpperCase() === s.toUpperCase());
+        if (!c) return null;
+        cur = c;
+      }
+      const isDir = Array.isArray(cur.nodes);
+      return {
+        name: cur.name ?? "",
+        size: cur.size ?? 0,
+        isDir,
+        childCount: isDir ? (cur.nodes?.length ?? 0) : 0,
+      };
+    }, unix) as FsStat | null;
   }
 
   async fsDelete(dosPath: string): Promise<void> {

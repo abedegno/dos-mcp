@@ -20,6 +20,7 @@ export interface Backend {
   fsRead(dosPath: string): Promise<Buffer>;
   fsWrite(dosPath: string, bytes: Buffer): Promise<void>;
   fsList(dosPath: string): Promise<FsEntry[]>;
+  fsStat(dosPath: string): Promise<FsStat | null>;
   fsDelete(dosPath: string): Promise<void>;
   fsSync(): Promise<{ mirrorsFlushed: number }>;
 }
@@ -45,4 +46,11 @@ export interface FsEntry {
   name: string;
   size: number;
   isDir: boolean;
+}
+
+export interface FsStat {
+  name: string;
+  size: number;
+  isDir: boolean;
+  childCount: number;
 }
