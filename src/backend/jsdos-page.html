@@ -155,13 +155,13 @@
       });
 
       // --- mouse bridge ----------------------------------------------------
-      // ci.sendMouseMotion accepts normalized 0..1 coords derived from the
-      // canvas's client rect (so CSS upscaling doesn't break aiming).
+      // Empirically v8's sendMouseMotion wants pixel coords in the canvas's
+      // internal frame size (e.g. 320x200 for VGA), not normalized 0..1.
       function normXY(ev) {
         const r = canvas.getBoundingClientRect();
-        const x = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
-        const y = Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height));
-        return { x, y };
+        const cx = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+        const cy = Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height));
+        return { x: cx * canvas.width, y: cy * canvas.height };
       }
       canvas.addEventListener("mousemove", (ev) => {
         const { x, y } = normXY(ev);
