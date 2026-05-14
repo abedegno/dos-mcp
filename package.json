@@ -29,13 +29,13 @@
     "yauzl": "^3.1.3"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
+    "@types/node": "^20.19.41",
     "@types/yauzl": "^2.10.3",
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
-    "@typescript-eslint/parser": "^8.0.0",
-    "eslint": "^10.2.1",
+    "@typescript-eslint/eslint-plugin": "^8.59.3",
+    "@typescript-eslint/parser": "^8.59.3",
+    "eslint": "^10.3.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.0.0",
+    "typescript-eslint": "^8.59.3",
     "vitest": "^1.4.0"
   },
   "engines": {
