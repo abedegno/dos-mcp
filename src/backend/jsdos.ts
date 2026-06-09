@@ -25,6 +25,7 @@
 
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { appendFileSync, writeFileSync } from "node:fs";
 import puppeteer, { Browser, Page } from "puppeteer";
 import type {
   Backend,
@@ -43,6 +44,33 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface JsDosBackendOptions {
   headless: boolean;
+}
+
+/** Represents a js-dos FsNode from ci.fsTree() */
+interface FsNode {
+  name: string;
+  size: number | null;
+  nodes: FsNode[] | null;
+}
+
+/**
+ * Walk an FsNode tree to find the subtree rooted at `unixPath`.
+ * The root node itself has name "" (empty) or the drive name;
+ * we match path segments one at a time.
+ */
+function findNode(root: FsNode, unixPath: string): FsNode | null {
+  // Normalise: strip leading slash, split
+  const segments = unixPath.replace(/^\/+/, "").split("/").filter(Boolean);
+  let current: FsNode = root;
+  for (const seg of segments) {
+    if (!current.nodes) return null;
+    const child = current.nodes.find(
+      n => n.name.toUpperCase() === seg.toUpperCase()
+    );
+    if (!child) return null;
+    current = child;
+  }
+  return current;
 }
 
 export class JsDosBackend implements Backend {
@@ -83,8 +111,25 @@ export class JsDosBackend implements Backend {
     this.page = await this.browser.newPage();
     await this.page.setViewport({ width: 640, height: 400 });
 
+    // Capture [DOSMCP-DBG] console logs from the page (including printf from
+    // the WASM worker's stdout → console pipe) into a host-side file for
+    // post-session inspection.
+    const dbgLogPath = "/tmp/dos-mcp-page-console.log";
+    try { writeFileSync(dbgLogPath, ""); } catch { /* swallow */ }
+    this.page.on("console", (msg) => {
+      const text = msg.text();
+      if (text.includes("[DOSMCP-DBG]") || text.includes("[dos-mcp]")) {
+        try { appendFileSync(dbgLogPath, text + "\n"); } catch { /* swallow */ }
+      }
+    });
+
     const htmlPath = path.join(__dirname, "jsdos-page.html");
-    await this.page.goto("file://" + htmlPath);
+    // DOSMCP_EMU_BASE=http://localhost:8080/emulators/ points the page at a
+    // locally-built emulators bundle (for debugging the WASM itself). Default
+    // is the CDN baked into jsdos-page.html.
+    const emuBase = process.env.DOSMCP_EMU_BASE;
+    const qs = emuBase ? "?emuBase=" + encodeURIComponent(emuBase) : "";
+    await this.page.goto("file://" + htmlPath + qs);
 
     // Wait until emulators.js has loaded and the load-event handler has set
     // window.__dosmcp.ready.  (emulators.js sets window.emulators synchronously
@@ -254,10 +299,10 @@ export class JsDosBackend implements Backend {
     if (!this.page) throw new Error("not loaded");
     const unix = dosPathToUnix(dosPath);
 
-    // ci.fsTree() returns the whole FS. Serializing it back across the
-    // Puppeteer bridge on every call was the source of fs_list timeouts on
-    // large trees. Do the walk inside the browser and only return the direct
-    // children of the requested node.
+    // ci.fsTree() returns the whole FS — serializing it back across the
+    // Puppeteer bridge on every call was the source of the original fs_list
+    // timeouts on large trees. Do the walk inside the browser and only
+    // return the direct children of the requested node.
     return await this.page.evaluate(async (target: string) => {
       const ci = (window as any).__dosmcp.ci;
       const tree = await ci.fsTree();

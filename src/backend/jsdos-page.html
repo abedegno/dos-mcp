@@ -31,7 +31,14 @@
     not methods) so the drawing buffer stays pixel-perfect while CSS scales
     the canvas up to the full viewport.
   -->
-  <script src="https://v8.js-dos.com/latest/emulators/emulators.js"></script>
+  <script>
+    // Allow the host side to point us at a locally-built emulators bundle
+    // (for debugging). Default: CDN. Override via ?emuBase=http://localhost:8080/emulators/
+    const __emuBase =
+      new URLSearchParams(location.search).get("emuBase") ||
+      "https://v8.js-dos.com/latest/emulators/";
+    document.write('<script src="' + __emuBase + 'emulators.js"><\/script>');
+  </script>
   <script>
     // GLFW keycode constants used by emulators-v8.
     const KBD_esc = 256, KBD_enter = 257, KBD_tab = 258, KBD_backspace = 259,
@@ -89,14 +96,45 @@
       ready: false,
     };
 
+    // Debug ring — write to the DOS VFS so `fs_read C:/_BRIDGE.LOG` from host
+    // can retrieve the last N events. In-memory buffer + ci.fsWriteFile each
+    // call (fsWriteFile is full-overwrite).
+    const __dbg = { lines: [], max: 400 };
+    let __dbgCi = null;
+    function dbg(msg) {
+      __dbg.lines.push(msg);
+      if (__dbg.lines.length > __dbg.max) __dbg.lines.shift();
+      try {
+        if (__dbgCi && typeof __dbgCi.fsWriteFile === "function") {
+          __dbgCi.fsWriteFile("_BRIDGE.LOG", new TextEncoder().encode(__dbg.lines.join("\n")));
+        }
+      } catch { /* swallow */ }
+    }
+
     function attachBridges(ci) {
+      __dbgCi = ci;
       const canvas = document.getElementById("canvas");
       const ctx = canvas.getContext("2d");
 
+      // Log the initial state so we can see viewport/canvas geometry.
+      const r0 = canvas.getBoundingClientRect();
+      dbg(`[attach] canvas.w=${canvas.width} h=${canvas.height} rect=${r0.width.toFixed(1)}x${r0.height.toFixed(1)} @(${r0.left.toFixed(1)},${r0.top.toFixed(1)}) dpr=${window.devicePixelRatio}`);
+      dbg(`[attach] viewport.innerW=${window.innerWidth} innerH=${window.innerHeight}`);
+      dbg(`[attach] ci keys: ${Object.keys(ci).join(",")}`);
+      dbg(`[attach] ci.width=${typeof ci.width} height=${typeof ci.height} frameWidth=${ci.frameWidth} frameHeight=${ci.frameHeight}`);
+      if (typeof ci.width === "function") {
+        try { dbg(`[attach] ci.width()=${ci.width()} ci.height()=${ci.height()}`); } catch (e) { dbg(`[attach] ci.width() threw: ${e}`); }
+      }
+
       // --- renderer -------------------------------------------------------
+      let __frameCount = 0;
       const drawFrame = (rgb, rgba) => {
+        __frameCount++;
         const w = ci.frameWidth || 640;
         const h = ci.frameHeight || 400;
+        if (__frameCount === 1 || __frameCount % 30 === 0) {
+          dbg(`[frame #${__frameCount}] rgb=${!!rgb} rgba=${!!rgba} w=${w} h=${h} canvas=${canvas.width}x${canvas.height}`);
+        }
         const data = rgba || rgb;
         if (!data) return;
         let rgbaData;
@@ -137,6 +175,7 @@
       const pressed = new Set();
       document.addEventListener("keydown", (e) => {
         const code = domToKeyCode(e.keyCode, e.location);
+        dbg(`[kd] domKey=${e.keyCode} key=${JSON.stringify(e.key)} loc=${e.location} -> glfw=${code} target=${e.target.tagName || "?"}`);
         if (!code) return;
         ci.sendKeyEvent(code, true);
         pressed.add(code);
@@ -144,6 +183,7 @@
       });
       document.addEventListener("keyup", (e) => {
         const code = domToKeyCode(e.keyCode, e.location);
+        dbg(`[ku] domKey=${e.keyCode} -> glfw=${code}`);
         if (!code) return;
         ci.sendKeyEvent(code, false);
         pressed.delete(code);
@@ -155,26 +195,33 @@
       });
 
       // --- mouse bridge ----------------------------------------------------
-      // Empirically v8's sendMouseMotion wants pixel coords in the canvas's
-      // internal frame size (e.g. 320x200 for VGA), not normalized 0..1.
+      // emulators-v8's ci.sendMouseMotion takes normalized 0..1 coords — same
+      // convention as caiiiycuk/js-dos src/window/dos/controls/mouse/mouse-default.ts.
       function normXY(ev) {
         const r = canvas.getBoundingClientRect();
-        const cx = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
-        const cy = Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height));
-        return { x: cx * canvas.width, y: cy * canvas.height };
+        const x = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+        const y = Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height));
+        return { x, y, r };
       }
+      let __mouseMoveCount = 0;
       canvas.addEventListener("mousemove", (ev) => {
-        const { x, y } = normXY(ev);
+        __mouseMoveCount++;
+        const { x, y, r } = normXY(ev);
+        if (__mouseMoveCount <= 5 || __mouseMoveCount % 20 === 0) {
+          dbg(`[mm #${__mouseMoveCount}] client=(${ev.clientX},${ev.clientY}) rect=${r.width.toFixed(1)}x${r.height.toFixed(1)} @(${r.left.toFixed(1)},${r.top.toFixed(1)}) norm=(${x.toFixed(3)},${y.toFixed(3)})`);
+        }
         ci.sendMouseMotion(x, y);
       });
       canvas.addEventListener("mousedown", (ev) => {
-        const { x, y } = normXY(ev);
+        const { x, y, r } = normXY(ev);
+        dbg(`[md] client=(${ev.clientX},${ev.clientY}) norm=(${x.toFixed(3)},${y.toFixed(3)}) btn=${ev.button}`);
         ci.sendMouseMotion(x, y);
         ci.sendMouseButton(ev.button === 2 ? 1 : 0, true);
         ev.preventDefault();
       });
       canvas.addEventListener("mouseup", (ev) => {
         const { x, y } = normXY(ev);
+        dbg(`[mu] client=(${ev.clientX},${ev.clientY}) norm=(${x.toFixed(3)},${y.toFixed(3)}) btn=${ev.button}`);
         ci.sendMouseMotion(x, y);
         ci.sendMouseButton(ev.button === 2 ? 1 : 0, false);
         ev.preventDefault();
@@ -185,7 +232,7 @@
 
     window.addEventListener("load", function () {
       if (window.emulators) {
-        window.emulators.pathPrefix = "https://v8.js-dos.com/latest/emulators/";
+        window.emulators.pathPrefix = __emuBase;
         window.__dosmcp.emulators = window.emulators;
         window.__dosmcp.ready = true;
       }
