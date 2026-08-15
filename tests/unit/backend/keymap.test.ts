@@ -35,7 +35,20 @@ function loadKeyMap(): Record<number, number> {
   const html = fs.readFileSync(PAGE, "utf8");
   const constants = extractDeclaration(html, "KBD_esc");
   const map = extractDeclaration(html, "domKeyToDosKeyCodes");
-  return new Function(`${constants}\n${map}\nreturn domKeyToDosKeyCodes;`)();
+  const loaded = new Function(`${constants}\n${map}\nreturn domKeyToDosKeyCodes;`)();
+  // extractDeclaration counts brackets and stops at a depth-zero semicolon. It is
+  // not aware of strings or comments, so an added comment containing a brace could
+  // truncate the object and leave a map that parses but is short. Fail here with the
+  // reason, rather than letting a later assertion report a missing key and send the
+  // reader looking at the map instead of at this scanner.
+  const count = Object.keys(loaded).length;
+  if (count < 50) {
+    throw new Error(
+      `extracted only ${count} key mappings from jsdos-page.html, so the declaration ` +
+        `scanner mis-terminated rather than the map itself being wrong`,
+    );
+  }
+  return loaded;
 }
 
 describe("jsdos-page DOM-to-guest key map", () => {

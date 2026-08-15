@@ -27,10 +27,9 @@ describe("js-dos integration — arrow key delivery", () => {
     // this pass. Either outcome stays within 8.3, so the wrong name is still
     // created rather than rejected, which keeps the two cases distinguishable.
     //
-    // Deliberately no shifted character anywhere: send_keys cannot type one,
-    // because Puppeteer gives '.' and '>' the same keyCode with no shiftKey set
-    // and the page maps by keyCode alone (issue #31). DOS stores directory names
-    // uppercase whatever case is typed, so that bug does not affect this test.
+    // Deliberately no shifted character anywhere, so this tests arrow delivery
+    // alone and does not depend on the separate shifted-character handling in #31.
+    // DOS stores directory names uppercase whatever case is typed.
     const head = "MD AB";
     const tail = "DEFGH";
     const missing = "C";
