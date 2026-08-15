@@ -13,6 +13,8 @@ export class FakeBackend implements Backend {
   public recordedKeySequences: string[][] = [];
   public recordedClicks: Array<{ x: number; y: number; button: string }> = [];
   public recordedMoves: Array<{ x: number; y: number }> = [];
+  public recordedRelativeMoves: Array<{ dx: number; dy: number }> = [];
+  public recordedCursorClicks: Array<{ button: string; holdMs: number }> = [];
 
   async loadBundle(_options: LoadBundleOptions): Promise<LoadBundleResult> {
     this.running = true;
@@ -45,6 +47,14 @@ export class FakeBackend implements Backend {
 
   async moveMouse(x: number, y: number): Promise<void> {
     this.recordedMoves.push({ x, y });
+  }
+
+  async moveMouseRelative(dx: number, dy: number): Promise<void> {
+    this.recordedRelativeMoves.push({ dx, dy });
+  }
+
+  async clickAtCursor(button: "left" | "right" = "left", holdMs = 120): Promise<void> {
+    this.recordedCursorClicks.push({ button, holdMs });
   }
 
   async screenshot(format: "png" | "jpeg" = "png"): Promise<{ bytes: Buffer; mime: string }> {

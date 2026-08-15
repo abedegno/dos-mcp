@@ -5,6 +5,8 @@ import {
   sendKeySequenceTool,
   sendClickTool,
   moveMouseTool,
+  moveMouseRelativeTool,
+  clickAtCursorTool,
 } from "./input.js";
 import { screenshotTool, getStatusTool } from "./observe.js";
 import {
@@ -33,6 +35,8 @@ export const tools: ToolDef[] = [
   sendKeySequenceTool,
   sendClickTool,
   moveMouseTool,
+  moveMouseRelativeTool,
+  clickAtCursorTool,
   screenshotTool,
   getStatusTool,
   fsReadTool,
