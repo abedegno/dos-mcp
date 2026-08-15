@@ -38,6 +38,7 @@ import { detectBundleSource } from "../bundle/detect.js";
 import { extractDirectory, extractZip } from "../bundle/extract.js";
 import { MirrorTracker } from "../mirror/mirror.js";
 import { dosPathToUnix } from "../paths.js";
+import { startStaticServer, type StaticServer } from "./serve.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -52,10 +53,42 @@ export class JsDosBackend implements Backend {
   private running = false;
   private mirror = new MirrorTracker();
   private lastError?: string;
+  private staticServer?: StaticServer;
 
   constructor(private opts: JsDosBackendOptions) {}
 
   async loadBundle(options: LoadBundleOptions): Promise<LoadBundleResult> {
+    // A failure partway through startup would otherwise leave the browser and the
+    // static server allocated with no handle to reach them, and a surviving
+    // Chromium keeps running the guest at ~100% CPU per renderer.
+    try {
+      return await this.loadBundleInner(options);
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err);
+      await this.disposeResources();
+      throw err;
+    }
+  }
+
+  /** Drop the browser and static server without assuming a live page. */
+  private async disposeResources(): Promise<void> {
+    if (this.browser) {
+      await this.closeBrowser(this.browser);
+      this.browser = undefined;
+    }
+    this.page = undefined;
+    if (this.staticServer) {
+      try {
+        await this.staticServer.close();
+      } catch {
+        // already down
+      }
+      this.staticServer = undefined;
+    }
+    this.running = false;
+  }
+
+  private async loadBundleInner(options: LoadBundleOptions): Promise<LoadBundleResult> {
     // 1. Build an in-memory DOS file tree from the source.
     const kind = detectBundleSource(options.source);
     const tree: Map<string, Buffer> =
@@ -75,16 +108,26 @@ export class JsDosBackend implements Backend {
         "--no-sandbox",
         "--disable-dev-shm-usage",
         // dosboxDirect uses SharedArrayBuffer for sync Atomics across the WASM
-        // worker.  Without this flag headless Chromium may disable SAB on
-        // non-cross-origin-isolated pages (i.e. file:// URLs).
+        // worker.  The page is served with COOP/COEP so it is genuinely
+        // cross-origin isolated, but keep the flag for older Chromium builds.
         "--enable-features=SharedArrayBuffer",
       ],
     });
     this.page = await this.browser.newPage();
     await this.page.setViewport({ width: 640, height: 400 });
 
-    const htmlPath = path.join(__dirname, "jsdos-page.html");
-    await this.page.goto("file://" + htmlPath);
+    // Serve the page over http so it can be cross-origin isolated. When
+    // DOSMCP_JSDOS_DIR points at a locally built emulators dist, serve that too
+    // and tell the page to load js-dos from there instead of the CDN, which only
+    // ever offers a moving /latest/.
+    const localDist = process.env.DOSMCP_JSDOS_DIR;
+    const roots: Record<string, string> = { "/": __dirname };
+    if (localDist) roots["/jsdos/"] = localDist;
+    this.staticServer = await startStaticServer(roots, Boolean(localDist));
+
+    const pageUrl = new URL("/jsdos-page.html", this.staticServer.origin);
+    if (localDist) pageUrl.searchParams.set("jsdos", "/jsdos/");
+    await this.page.goto(pageUrl.toString());
 
     // Wait until emulators.js has loaded and the load-event handler has set
     // window.__dosmcp.ready.  (emulators.js sets window.emulators synchronously
@@ -165,8 +208,39 @@ export class JsDosBackend implements Backend {
         // page may already be closing
       }
     }
-    if (this.browser) await this.browser.close();
+    if (this.browser) await this.closeBrowser(this.browser);
+    if (this.staticServer) {
+      await this.staticServer.close();
+      this.staticServer = undefined;
+    }
+    this.browser = undefined;
+    this.page = undefined;
     this.running = false;
+  }
+
+  /**
+   * Close the browser, and SIGKILL it if it will not go quietly. A graceful
+   * close() can wedge, and giving up on the await is not enough: the whole point
+   * is that a surviving Chromium keeps running the DOS guest at ~100% CPU per
+   * renderer indefinitely, so it has to actually die.
+   */
+  private async closeBrowser(browser: Browser): Promise<void> {
+    const proc = browser.process();
+    try {
+      await Promise.race([
+        browser.close(),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error("browser close timed out")), 4000)
+        ),
+      ]);
+    } catch (err) {
+      try {
+        proc?.kill("SIGKILL");
+      } catch {
+        // already gone
+      }
+      console.error("dos-mcp: forced browser kill:", err);
+    }
   }
 
   async wait(ms: number): Promise<void> {
@@ -207,6 +281,7 @@ export class JsDosBackend implements Backend {
     if (!this.page) throw new Error("not loaded");
     await this.page.mouse.move(x, y);
   }
+
 
   async screenshot(format: "png" | "jpeg" = "png"): Promise<{ bytes: Buffer; mime: string }> {
     if (!this.page) throw new Error("not loaded");

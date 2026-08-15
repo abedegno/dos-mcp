@@ -31,7 +31,44 @@
     not methods) so the drawing buffer stays pixel-perfect while CSS scales
     the canvas up to the full viewport.
   -->
-  <script src="https://v8.js-dos.com/latest/emulators/emulators.js"></script>
+  <!--
+    js-dos source is chosen at runtime via ?jsdos=<prefix> so the host can point
+    at a locally built emulators dist. Defaults to the CDN when absent.
+
+    Pinning matters: the CDN only ever serves /latest/ (there are no versioned
+    paths, 8.3.9 and 8.4.1 both 404), so a page written against one release
+    silently starts running the next one. 8.4.x changed sendMouseMotion from
+    canvas pixels to normalized 0..1, which broke the mouse bridge outright.
+  -->
+  <script>
+    // The prefix is validated and then assigned as a DOM property, never
+    // concatenated into markup. Building a <script> tag as an HTML string from a
+    // query parameter is an injection: a crafted value closes the src attribute
+    // and injects arbitrary attributes or elements.
+    const JSDOS_DEFAULT = "https://v8.js-dos.com/latest/emulators/";
+    const JSDOS_PREFIX = (function () {
+      const raw = new URLSearchParams(location.search).get("jsdos");
+      if (!raw) return JSDOS_DEFAULT;
+      // Resolve and require same origin, rather than pattern-matching the string.
+      // A character-class regex that allows "/" also allows the protocol-relative
+      // "//evil.example/", which would fetch the engine from another host. Taking
+      // only the pathname of a same-origin URL also drops any query or fragment.
+      try {
+        const u = new URL(raw, location.origin);
+        if (u.origin !== location.origin) return JSDOS_DEFAULT;
+        return u.pathname.endsWith("/") ? u.pathname : JSDOS_DEFAULT;
+      } catch (e) {
+        return JSDOS_DEFAULT;
+      }
+    })();
+
+    // async=false keeps execution ordered and still delays the load event, which
+    // the handler at the bottom of this file relies on to see window.emulators.
+    var jsdosScript = document.createElement("script");
+    jsdosScript.src = JSDOS_PREFIX + "emulators.js";
+    jsdosScript.async = false;
+    document.currentScript.after(jsdosScript);
+  </script>
   <script>
     // GLFW keycode constants used by emulators-v8.
     const KBD_esc = 256, KBD_enter = 257, KBD_tab = 258, KBD_backspace = 259,
@@ -155,27 +192,50 @@
       });
 
       // --- mouse bridge ----------------------------------------------------
-      // Empirically v8's sendMouseMotion wants pixel coords in the canvas's
-      // internal frame size (e.g. 320x200 for VGA), not normalized 0..1.
+      // sendMouseMotion takes ABSOLUTE NORMALIZED 0..1 coords in emulators 8.4.x.
+      // 8.3.x took canvas pixels, so a page written for 8.3.x sends values like
+      // 200 where 1.0 is the maximum and the cursor never moves at all. Verified
+      // against 8.4.1: normalized motion is absolute and repeatable, landing on
+      // the same pixel regardless of which direction it is approached from.
+      //
+      // sendMouseRelativeMotion also exists for deltas. Prefer absolute here so
+      // positioning does not depend on accumulated state.
+      window.__dosmcp.mouseDebug = {
+        moves: 0, buttons: 0, sent: 0, lastErr: null, last: null,
+      };
+
+      // Returns absolute normalized 0..1 coords within the canvas.
       function normXY(ev) {
         const r = canvas.getBoundingClientRect();
-        const cx = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
-        const cy = Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height));
-        return { x: cx * canvas.width, y: cy * canvas.height };
+        const x = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+        const y = Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height));
+        window.__dosmcp.mouseDebug.last = { clientX: ev.clientX, clientY: ev.clientY, x, y };
+        return { x, y };
       }
-      canvas.addEventListener("mousemove", (ev) => {
+
+      function sendMotion(ev) {
         const { x, y } = normXY(ev);
-        ci.sendMouseMotion(x, y);
+        const dbg = window.__dosmcp.mouseDebug;
+        try {
+          ci.sendMouseMotion(x, y);
+          dbg.sent++;
+        } catch (e) {
+          dbg.lastErr = String(e);
+        }
+      }
+
+      canvas.addEventListener("mousemove", (ev) => {
+        window.__dosmcp.mouseDebug.moves++;
+        sendMotion(ev);
       });
       canvas.addEventListener("mousedown", (ev) => {
-        const { x, y } = normXY(ev);
-        ci.sendMouseMotion(x, y);
+        sendMotion(ev);
+        window.__dosmcp.mouseDebug.buttons++;
         ci.sendMouseButton(ev.button === 2 ? 1 : 0, true);
         ev.preventDefault();
       });
       canvas.addEventListener("mouseup", (ev) => {
-        const { x, y } = normXY(ev);
-        ci.sendMouseMotion(x, y);
+        sendMotion(ev);
         ci.sendMouseButton(ev.button === 2 ? 1 : 0, false);
         ev.preventDefault();
       });
@@ -185,7 +245,7 @@
 
     window.addEventListener("load", function () {
       if (window.emulators) {
-        window.emulators.pathPrefix = "https://v8.js-dos.com/latest/emulators/";
+        window.emulators.pathPrefix = JSDOS_PREFIX;
         window.__dosmcp.emulators = window.emulators;
         window.__dosmcp.ready = true;
       }
