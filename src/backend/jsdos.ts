@@ -56,6 +56,23 @@ const MAX_RELATIVE_DELTA = 30000;
 const DEFAULT_CLICK_HOLD_MS = 120;
 const MAX_CLICK_HOLD_MS = 10_000;
 
+// Characters that need Shift on a US layout, other than the uppercase letters.
+// Puppeteer gives a shifted character the same keyCode as its unshifted twin and
+// does not set shiftKey, so sendKeys has to hold Shift itself or the guest sees
+// the unshifted key: '>' arrives as '.', ':' as ';'. See issue #31.
+//
+// This table is layout-specific. DOSBox defaults to a US layout and no bundle here
+// changes it, so US is correct for now; a bundle that loads a different KEYB layout
+// would need the guest's layout consulted instead.
+const US_SHIFTED_CHARS = new Set('~!@#$%^&*()_+{}|:"<>?');
+
+function needsShift(ch: string): boolean {
+  // Uppercase by ch !== ch.toLowerCase() rather than a range test, so a letter
+  // outside A-Z is not silently treated as unshifted. Anything with no case at
+  // all, e.g. a digit, compares equal and is left alone.
+  return US_SHIFTED_CHARS.has(ch) || (ch !== ch.toLowerCase() && ch === ch.toUpperCase());
+}
+
 export interface JsDosBackendOptions {
   headless: boolean;
 }
@@ -282,7 +299,21 @@ export class JsDosBackend implements Backend {
   async sendKeys(text: string, keyDelayMs = 10): Promise<void> {
     if (!this.page) throw new Error("not loaded");
     for (const ch of text) {
-      await this.page.keyboard.type(ch);
+      // Hold Shift ourselves where the character needs it. Puppeteer relies on the
+      // event's text field, which a browser uses to insert into a DOM input; the
+      // page bridge has no input to insert into and maps keyCode to a KBD_KEYS
+      // value, so without this the guest gets the unshifted key. Pressing Shift
+      // produces a real keydown for keyCode 16, which the page's map already turns
+      // into KBD_leftshift, so the guest applies the shift itself. See issue #31.
+      const shifted = needsShift(ch);
+      if (shifted) await this.page.keyboard.down("Shift");
+      try {
+        await this.page.keyboard.type(ch);
+      } finally {
+        // Release even if typing throws. A latched Shift would otherwise corrupt
+        // every later key, since the page would never see the keyup.
+        if (shifted) await this.page.keyboard.up("Shift");
+      }
       if (keyDelayMs > 0) await new Promise<void>(r => setTimeout(r, keyDelayMs));
     }
   }
