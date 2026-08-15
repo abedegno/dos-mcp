@@ -1,8 +1,11 @@
 /**
  * JsDosBackend — Puppeteer + js-dos v8 implementation of the Backend interface.
  *
- * js-dos version: 8.3.x  CDN: https://v8.js-dos.com/latest/js-dos.js
- * emulators package: 8.3.9  (https://github.com/caiiiycuk/emulators)
+ * emulators package: 8.4.x. The CDN only ever serves /latest/ (there are no
+ * versioned paths), so set DOSMCP_JSDOS_DIR to a locally built dist to pin it.
+ * Do not restate a version here without checking: this header claimed 8.3.9
+ * long after /latest/ had moved to 8.4.1, and 8.4.x changed sendMouseMotion
+ * from canvas pixels to normalized 0..1, which silently broke the mouse bridge.
  *
  * API surface used:
  *   - emulators.dosboxDirect(init: InitFs, options?)  →  CommandInterface
@@ -42,6 +45,17 @@ import { startStaticServer, type StaticServer } from "./serve.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Relative deltas reach the engine as a native float and are then cast to int,
+// so keep them well inside signed 16-bit rather than trusting the caller.
+const MAX_RELATIVE_DELTA = 30000;
+// A guest polls the mouse, so a click has to stay down long enough to be seen.
+// 120ms spans just over two 55ms DOS timer ticks at 18.2Hz. There is no
+// universally correct value: the engine ignores the wire timestamp and DOSBox
+// tracks both button state and edge counters, so a game polling very slowly
+// could still miss it. Treat this as a compatibility default, overridable.
+const DEFAULT_CLICK_HOLD_MS = 120;
+const MAX_CLICK_HOLD_MS = 10_000;
+
 export interface JsDosBackendOptions {
   headless: boolean;
 }
@@ -54,6 +68,8 @@ export class JsDosBackend implements Backend {
   private mirror = new MirrorTracker();
   private lastError?: string;
   private staticServer?: StaticServer;
+  private clickChain: Promise<void> = Promise.resolve();
+  private buttonsDown = new Set<number>();
 
   constructor(private opts: JsDosBackendOptions) {}
 
@@ -195,6 +211,21 @@ export class JsDosBackend implements Backend {
 
   async shutdown(): Promise<void> {
     await this.mirror.flush();
+    // Release anything still held, so a shutdown mid-click does not leave the
+    // guest believing a button is down.
+    if (this.page && this.buttonsDown.size > 0) {
+      for (const b of [...this.buttonsDown]) {
+        try {
+          await this.page.evaluate((btn: number) => {
+            const ci = (window as any).__dosmcp?.ci;
+            if (ci) ci.sendMouseButton(btn, false);
+          }, b);
+        } catch {
+          // page already closing
+        }
+      }
+      this.buttonsDown.clear();
+    }
     if (this.page) {
       try {
         await this.page.evaluate(async () => {
@@ -280,6 +311,87 @@ export class JsDosBackend implements Backend {
   async moveMouse(x: number, y: number): Promise<void> {
     if (!this.page) throw new Error("not loaded");
     await this.page.mouse.move(x, y);
+  }
+
+  async moveMouseRelative(dx: number, dy: number): Promise<void> {
+    if (!this.page) throw new Error("not loaded");
+    // Deltas are narrowed to a native float and then cast straight to int in the
+    // engine's relative path, so an out-of-range value is an unsafe conversion.
+    // Stay comfortably inside signed 16-bit and require whole mickeys.
+    for (const [name, v] of [["dx", dx], ["dy", dy]] as const) {
+      if (!Number.isInteger(v)) {
+        throw new Error(`moveMouseRelative ${name} must be a whole number, got ${v}`);
+      }
+      if (Math.abs(v) > MAX_RELATIVE_DELTA) {
+        throw new Error(
+          `moveMouseRelative ${name} of ${v} exceeds +/-${MAX_RELATIVE_DELTA}`
+        );
+      }
+    }
+    // Goes straight to the engine rather than through a synthetic DOM event,
+    // because a DOM mousemove only carries an absolute position and the bridge
+    // would convert it back into a delta from wherever the pointer happened to
+    // be. sendMouseRelativeMotion sets relative:true on the same wire message.
+    await this.page.evaluate(
+      (x: number, y: number) => {
+        const ci = (window as any).__dosmcp?.ci;
+        if (!ci) throw new Error("emulator not started");
+        if (typeof ci.sendMouseRelativeMotion !== "function") {
+          throw new Error("engine has no sendMouseRelativeMotion");
+        }
+        ci.sendMouseRelativeMotion(x, y);
+      },
+      dx,
+      dy
+    );
+  }
+
+  async clickAtCursor(
+    button: "left" | "right" = "left",
+    holdMs = DEFAULT_CLICK_HOLD_MS
+  ): Promise<void> {
+    if (!this.page) throw new Error("not loaded");
+    if (!Number.isFinite(holdMs) || holdMs < 0 || holdMs > MAX_CLICK_HOLD_MS) {
+      throw new Error(`clickAtCursor holdMs must be 0..${MAX_CLICK_HOLD_MS}, got ${holdMs}`);
+    }
+    const b = button === "right" ? 1 : 0;
+    // Serialise clicks. Two overlapping calls would otherwise interleave their
+    // down/up pairs and the guest would see a nonsensical button sequence.
+    const run = this.clickChain.then(async () => {
+      const press = (pressed: boolean) =>
+        this.page!.evaluate(
+          (btn: number, down: boolean) => {
+            const ci = (window as any).__dosmcp?.ci;
+            if (!ci) throw new Error("emulator not started");
+            ci.sendMouseButton(btn, down);
+          },
+          b,
+          pressed
+        );
+      // Hold the button down across real time. The guest polls the mouse, so a
+      // press and release delivered in the same instant can be missed entirely:
+      // both wire messages carry near-identical timestamps and the emulator
+      // never ticks between them.
+      await press(true);
+      this.buttonsDown.add(b);
+      try {
+        await new Promise<void>((r) => setTimeout(r, holdMs));
+      } finally {
+        // Always attempt the release. Without this, a failure or a shutdown
+        // during the hold leaves the guest believing the button is still down:
+        // INT 33h fn 03 keeps reporting it pressed and fn 06 never sees a
+        // release. Nothing can deliver it if the page is already gone, which is
+        // why shutdown also releases anything still held.
+        try {
+          await press(false);
+          this.buttonsDown.delete(b);
+        } catch {
+          // page or emulator already gone
+        }
+      }
+    });
+    this.clickChain = run.catch(() => undefined);
+    return run;
   }
 
 
