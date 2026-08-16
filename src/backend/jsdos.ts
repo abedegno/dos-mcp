@@ -97,6 +97,73 @@ export const CONTROL_KEYS: Record<string, string> = {
   "\x7f": "Delete",
 };
 
+// Page.captureScreenshot intermittently fails with a bare "Internal error" on long
+// sessions, and the failure currently ends the run, which for a driven DOS session
+// costs the whole emulator state and every step taken to reach it. See issue #28.
+//
+// The cause is NOT established. Roughly 890 captures across four configurations failed
+// to reproduce it: captures alone, captures interleaved with the evaluate-heavy input
+// traffic present in both real failures, three concurrent sessions, and one session
+// under full CPU saturation. So this is survivability, not a cure, and #28 stays open.
+//
+// Retry by exclusion rather than by matching the one message that was reported. CDP has
+// more than one way to refuse a capture: "Unable to capture screenshot" was also
+// observed here, so an allow-list keyed on "Internal error" would have let a sibling
+// failure through, which is the same mistake as fixing '\t' and leaving '\b' broken.
+//
+// The exclusions are the cases where retrying is worse than failing. protocolTimeout
+// defaults to 180s, so retrying a hung capture turns a three-minute failure into a
+// nine-minute one, and once the target or session is gone no number of attempts will
+// help. Everything else is treated as possibly transient and costs at most two extra
+// attempts and half a second.
+const CAPTURE_FATAL_SIGNATURES = [
+  /timed out/i, // protocolTimeout — already cost 180s, do not multiply it
+  /target closed/i,
+  /session closed/i,
+  /connection closed/i,
+  /detached/i,
+  /not loaded/i, // our own guard, not a CDP failure
+];
+const CAPTURE_ATTEMPTS = 3;
+const CAPTURE_RETRY_DELAY_MS = 250;
+
+function captureFailureIsFatal(message: string): boolean {
+  return CAPTURE_FATAL_SIGNATURES.some(signature => signature.test(message));
+}
+
+// Separated from the backend so the retry policy can be tested without a browser:
+// what matters is which errors are retried, how many times, and that the original
+// error survives. Exercising that through a real Chromium would be slow and could not
+// produce the failure on demand anyway.
+export async function captureWithRetry(
+  capture: () => Promise<Uint8Array>,
+  attempts: number = CAPTURE_ATTEMPTS,
+  delayMs: number = CAPTURE_RETRY_DELAY_MS,
+): Promise<Uint8Array> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await capture();
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (captureFailureIsFatal(message)) throw error;
+      if (attempt === attempts) {
+        // Keep the original as the cause: the message a caller sees should say the
+        // retries happened, without hiding what actually failed.
+        throw new Error(
+          `screenshot failed after ${attempts} attempts: ${message}`,
+          { cause: error },
+        );
+      }
+      if (delayMs > 0) await new Promise<void>(r => setTimeout(r, delayMs));
+    }
+  }
+  // Unreachable: the loop either returns or throws. Present so the function has a
+  // definite end rather than an implicit undefined.
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 // Whether send_keys can deliver a character as a keystroke.
 //
 // Printable ASCII is covered either by Puppeteer's own key table or by US_SHIFTED_BASE
@@ -500,9 +567,10 @@ export class JsDosBackend implements Backend {
 
   async screenshot(format: "png" | "jpeg" = "png"): Promise<{ bytes: Buffer; mime: string }> {
     if (!this.page) throw new Error("not loaded");
-    const raw = await this.page.screenshot({ type: format });
+    const page = this.page;
+    const raw = await captureWithRetry(() => page.screenshot({ type: format }));
     return {
-      bytes: Buffer.from(raw as Uint8Array),
+      bytes: Buffer.from(raw),
       mime: format === "png" ? "image/png" : "image/jpeg",
     };
   }
