@@ -12,7 +12,7 @@ updates:
           - minor
           - patch
     ignore:
-      # Pin @types/node to match the runtime engine (node 20). Type-only
+      # Pin @types/node to match the runtime engine (node 22). Type-only
       # majors diverge from runtime types and are just noise for us.
       - dependency-name: "@types/node"
         update-types:

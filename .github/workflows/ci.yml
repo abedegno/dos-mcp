@@ -7,11 +7,21 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both ends of what package.json claims to support. "22" tracks the latest
+        # 22.x, so on its own it would let the declared floor drift out of date
+        # without anything noticing; 22.13 is the floor itself, which is what makes
+        # the claim in engines.node checkable. Only the fast job runs the matrix.
+        # The integration workflow boots Chromium and js-dos, so doubling it costs
+        # more than it proves.
+        node-version: ["22.13", "22"]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
       - run: npm run typecheck
