@@ -14,13 +14,25 @@ import { tools } from "../../../src/tools/index";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const README = path.join(__dirname, "..", "..", "..", "README.md");
 
+// Only the tool tables count. Searching the whole file would let a tool be "documented"
+// by an incidental mention in the worked example, which is precisely what happened with
+// click_at_cursor: the example used it while no table listed it.
+function toolSection(readme: string): string {
+  const start = readme.indexOf("## Tools");
+  expect(start, "README has no '## Tools' section").toBeGreaterThan(-1);
+  const after = readme.indexOf("\n## ", start + 1);
+  return readme.slice(start, after === -1 ? undefined : after);
+}
+
 describe("README tool documentation", () => {
-  it("documents every registered tool", () => {
-    const readme = fs.readFileSync(README, "utf8");
-    // Matched as `name(` so a bare mention in prose does not satisfy it; every tool
-    // is documented with its signature.
-    const undocumented = tools.map(t => t.name).filter(name => !readme.includes(`\`${name}(`));
-    expect(undocumented, `not documented in README.md: ${undocumented.join(", ")}`).toEqual([]);
+  it("documents every registered tool in the tool tables", () => {
+    const section = toolSection(fs.readFileSync(README, "utf8"));
+    // Matched as a table row starting with `name(, so prose inside the section does not
+    // satisfy it either.
+    const undocumented = tools
+      .map(t => t.name)
+      .filter(name => !new RegExp(`^\\|\\s*\`${name}\\(`, "m").test(section));
+    expect(undocumented, `not in a README tool table: ${undocumented.join(", ")}`).toEqual([]);
   });
 
   it("states the number of tools that are actually registered", () => {

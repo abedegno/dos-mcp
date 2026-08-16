@@ -87,9 +87,14 @@ export const US_SHIFTED_BASE: Record<string, string> = {
 };
 
 // Control characters Puppeteer has no key definition for, mapped to the key that
-// produces them. Puppeteer's table covers '\n' and '\r' as Enter but none of these,
-// so each fell through to insertText, which the page's keydown bridge never sees, and
+// produces them. Puppeteer's table covers '\n' and '\r' as Enter but none of these, so
+// each fell through to insertText, which the page's keydown bridge never sees, and
 // send_keys did nothing at all for them.
+//
+// One control character is worse than dropped and is deliberately NOT here. Puppeteer
+// aliases '\0' to NumpadDecimal, keyCode 46, which the page maps to KBD_delete, so
+// send_keys("\0") pressed Delete in the guest. deliverableAsKeystroke refuses it along
+// with the other unmapped controls, which is why it must stay out of this table.
 export const CONTROL_KEYS: Record<string, string> = {
   "\b": "Backspace",
   "\t": "Tab",
@@ -101,10 +106,12 @@ export const CONTROL_KEYS: Record<string, string> = {
 // sessions, and the failure currently ends the run, which for a driven DOS session
 // costs the whole emulator state and every step taken to reach it. See issue #28.
 //
-// The cause is NOT established. Roughly 890 captures across four configurations failed
-// to reproduce it: captures alone, captures interleaved with the evaluate-heavy input
-// traffic present in both real failures, three concurrent sessions, and one session
-// under full CPU saturation. So this is survivability, not a cure, and #28 stays open.
+// The cause is NOT established. About 1040 captures across four counted configurations
+// failed to reproduce it: captures alone, captures interleaved with the evaluate-heavy
+// input traffic present in both real failures, three concurrent sessions, and one session
+// under full CPU saturation. A fifth run captured continuously across the canvas resize,
+// also without failing, but I did not count its captures. So this is survivability rather
+// than a cure, and #28 stays open.
 //
 // Retry by exclusion rather than by matching the one message that was reported. CDP has
 // more than one way to refuse a capture: "Unable to capture screenshot" was also
@@ -174,7 +181,10 @@ export async function captureWithRetry(
 // That silent nothing is the defect here, not the absence of a key. A caller asking
 // for a character DOS could not receive from a US keyboard anyway is better told so.
 export function deliverableAsKeystroke(ch: string): boolean {
-  if (ch in CONTROL_KEYS) return true;
+  // Object.hasOwn, not `in`: `in` would consult the prototype chain, and a single
+  // code point can never name an Object.prototype member today but nothing here
+  // depends on that staying true.
+  if (Object.hasOwn(CONTROL_KEYS, ch)) return true;
   if (ch === "\n" || ch === "\r") return true; // Enter, per Puppeteer's table
   const code = ch.codePointAt(0);
   return code !== undefined && code >= 0x20 && code <= 0x7e;
@@ -182,8 +192,7 @@ export function deliverableAsKeystroke(ch: string): boolean {
 
 // The key to press with Shift held, or null to type the character as-is.
 export function shiftedBaseKey(ch: string): string | null {
-  const punctuation = US_SHIFTED_BASE[ch];
-  if (punctuation !== undefined) return punctuation;
+  if (Object.hasOwn(US_SHIFTED_BASE, ch)) return US_SHIFTED_BASE[ch];
   // Restricted to ASCII A-Z on purpose. A cased character outside it, e.g. 'İ',
   // has no entry in Puppeteer's key table and falls through to insertText, which
   // the page's keydown bridge never sees; holding Shift around it would emit a
@@ -437,16 +446,17 @@ export class JsDosBackend implements Backend {
       // guest applies the shift itself: the Shift keydown is a real event for
       // keyCode 16, which the page's map already turns into KBD_leftshift. See
       // issue #31 and US_SHIFTED_BASE above.
-      const control = CONTROL_KEYS[ch];
-      const base = shiftedBaseKey(ch);
+      // Control first: a control character is never in the shifted table, so
+      // resolving the base key before knowing that is wasted work.
+      const control = Object.hasOwn(CONTROL_KEYS, ch) ? CONTROL_KEYS[ch] : undefined;
       if (control !== undefined) {
         await this.page.keyboard.press(control as any);
-      } else if (base === null) {
+      } else if (shiftedBaseKey(ch) === null) {
         await this.page.keyboard.type(ch);
       } else {
         await this.page.keyboard.down("Shift");
         try {
-          await this.page.keyboard.press(base as any);
+          await this.page.keyboard.press(shiftedBaseKey(ch) as any);
         } finally {
           // Release even if the press throws. A latched Shift would otherwise
           // corrupt every later key, since the page would never see the keyup.

@@ -120,10 +120,10 @@ Paths accept `C:/FOO/BAR.DAT`, `C:\FOO\BAR.DAT`, or `/FOO/BAR.DAT` (forward-slas
 3.  send_key_sequence(["Escape"]) x3, with ~2500ms waits   # title and intro
 4.  screenshot()                                  # confirm the main menu
 5.  move_mouse_relative(dx=-4000, dy=-4000)       # clamp into the corner
-6.  move_mouse_relative(dx=320, dy=322)           # "Journey Onward"
+6.  move_mouse_relative(dx=320, dy=322)           # "Journey Onward", observed position
 7.  click_at_cursor(hold_ms=200)
 8.  wait(2000); screenshot()                      # the save slot list
-9.  ... corner-slam again, then click slot 1 at about (320, 210)
+9.  ... corner-slam again, then click slot 1, observed near (320, 210)
 10. wait(2000); screenshot()                      # verify the restore landed
 11. fs_pull_dir(dos_path="C:/SAVE2", host_path="/path/to/dos-saves")
 12. shutdown()
@@ -148,10 +148,16 @@ Three things in that sequence are not obvious, and each one cost real time to fi
   the mouse and the emulator never ticks between two near-identical timestamps.
 
 Judging the result from screenshots needs care too. Frames only push when the buffer
-changes, so a still frame is not proof of a hung guest, and UW's menus animate the
-background palette by roughly 2.5% of pixels, so comparing image hashes reports a
-difference for every frame while telling you nothing. Compare the fraction of changed
-pixels instead, and treat anything under about 5% as no change.
+changes, so a still frame is not proof of a hung guest. Comparing image hashes does not
+work either: on UW's menus roughly 2.5% of pixels were observed changing from background
+palette animation alone, so every pair of frames hashes differently while telling you
+nothing.
+
+Compare the fraction of changed pixels instead. There is no safe universal threshold,
+though: a menu highlight, a cursor move or a small dialog can change fewer pixels than
+the animation does, so a cutoff chosen to ignore the animation will also ignore those.
+Prefer a reference frame for each outcome you care about and ask which one a capture is
+closer to.
 
 ## Architecture
 

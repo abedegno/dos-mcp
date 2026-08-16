@@ -70,6 +70,21 @@ describe("keystroke coverage", () => {
     expect(deliverableAsKeystroke("\r")).toBe(true);
   });
 
+  it("refuses NUL, which Puppeteer would turn into a Delete keypress", () => {
+    // The nastiest case, and not a dropped character at all. Puppeteer aliases '\0' to
+    // NumpadDecimal, keyCode 46, which the page maps to KBD_delete, so send_keys("\0")
+    // pressed Delete in the guest: silent, and destructive rather than merely lost.
+    expect(deliverableAsKeystroke("\0")).toBe(false);
+    // It must never gain a CONTROL_KEYS entry, since that would make it deliverable
+    // again and reintroduce exactly this.
+    expect(Object.hasOwn(CONTROL_KEYS, "\0")).toBe(false);
+  });
+
+  it("refuses a non-breaking space, which reads as a space but is not one", () => {
+    expect(deliverableAsKeystroke("\u00a0")).toBe(false);
+    expect(deliverableAsKeystroke(" ")).toBe(true); // an ordinary space is fine
+  });
+
   it("refuses what it cannot deliver, rather than dropping it", () => {
     // Remaining C0 controls need a Ctrl combination, which send_key_sequence covers.
     for (const ch of ["\x00", "\x03", "\x1a", "\v", "\f", "\x01"]) {
