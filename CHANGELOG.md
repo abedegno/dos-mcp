@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Nothing is released from this section yet; it records what has landed on `main` since
+0.1.0. Tool count is now 19, up from the 16 listed below.
+
+### Added
+
+- `move_mouse_relative(dx, dy)` and `click_at_cursor(button?, hold_ms?)` — needed for
+  games that track the cursor from INT 33h relative deltas rather than reading the
+  absolute position, which includes Ultima Underworld. An absolute move is only ever
+  seen as the delta it implies, so it cannot place such a cursor.
+- `fs_stat(dos_path)` — stat one entry without listing its parent.
+- `host_path` on `screenshot` — write the image to disk and return the path, for frames
+  too large to pass through the tool channel.
+
+### Changed
+
+- **Requires Node 22.13 or newer**, up from 20. Puppeteer 25 requires 22.12, and eslint
+  requires 22.13 for the 22 line, so 22.13 is the floor a working tree actually needs.
+- `send_keys` no longer silently ignores a character it cannot deliver. It refuses the
+  whole call instead, naming the offending characters, so nothing is half-typed.
+- The js-dos engine is pinned via `DOSMCP_JSDOS_DIR` rather than loaded from a CDN that
+  only ever serves a moving `/latest/`.
+- `screenshot` is documented as not being an atomic snapshot: the guest keeps running and
+  a refused capture is retried, so the frame can be later than the request.
+
+### Fixed
+
+- `send_keys` could not type any shifted character: `>` arrived as `.` and `:` as `;`,
+  and uppercase arrived lowercase. Puppeteer gives a shifted character the same keyCode
+  as its unshifted twin without setting `shiftKey`, and several of its single-character
+  names resolve to keypad keys, so `+` was dropped outright and `?` became `/`.
+- `send_keys("\0")` pressed Delete in the guest. Puppeteer aliases NUL to NumpadDecimal,
+  keyCode 46, which the bridge maps to `KBD_delete`.
+- `send_keys` silently dropped `\b`, `\t`, `\x1b` and `\x7f`, all of which have a real
+  key. They are now mapped.
+- Mouse input did not reach the guest at all: 8.4.x changed `sendMouseMotion` from canvas
+  pixels to normalized 0..1.
+- A click delivered as press and release in the same instant was missed entirely, because
+  the guest polls the mouse and the emulator never ticks between two near-identical
+  timestamps. `click_at_cursor` holds the button for 120ms by default.
+- A failed `screenshot` ended the whole session. Capture failures that can recover are
+  now retried; those that cannot, such as a closed target or a protocol timeout, still
+  fail at once. The underlying intermittent failure is unresolved, see issue #28.
+- The server orphaned Chromium processes when a client exited without calling
+  `shutdown`, leaving js-dos ticking at full CPU per process.
+- Arrow keys were reported as undeliverable in issue #27. They were always delivered;
+  the diagnosis was wrong and the issue is closed with regression tests.
+
 ## [0.1.0] — 2026-04-23
 
 ### Added
