@@ -28,12 +28,13 @@
 
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import puppeteer, {
-  Browser,
-  ConnectionClosedError,
-  Page,
-  TimeoutError,
-} from "puppeteer";
+import puppeteer, { Browser, ConnectionClosedError, Page, TimeoutError } from "puppeteer";
+// TargetCloseError is typed in puppeteer-core's own Errors.d.ts but is re-exported from
+// neither the bundled types.d.ts nor "puppeteer", so this deep path is the only way to
+// reach the class with types. The package's exports map provides ./internal/*, there is a
+// single copy of puppeteer-core installed, and the class object is identical to the one
+// "puppeteer" exports at runtime, so instanceof holds across both routes.
+import { TargetCloseError } from "puppeteer-core/internal/common/Errors.js";
 import type {
   Backend,
   BackendStatus,
@@ -151,12 +152,13 @@ function captureFailureIsFatal(error: unknown): boolean {
   // part of the first attempt.
   if (error instanceof ConnectionClosedError) return true;
   if (error instanceof TimeoutError) return true;
-  // TargetCloseError covers a closed page and a missing session whatever either is
-  // worded as, and is the most useful class here, but Puppeteer exports it at runtime
-  // only: it appears in no .d.ts, including puppeteer-core's. Matching the name avoids
-  // casting through any to reach an untyped class, and errorClasses.test.ts checks the
-  // name still matches a real instance so a rename fails loudly rather than silently
-  // turning this branch off.
+  // TargetCloseError covers a closed page and a missing session whatever either is worded
+  // as, which makes it the most useful class here.
+  if (error instanceof TargetCloseError) return true;
+  // Name as well as class, for the one case instanceof cannot cover: two copies of
+  // puppeteer-core in a tree give two distinct class objects, and instanceof then fails
+  // against the copy this module did not import. Costs nothing and cannot misfire, since
+  // no other error is named this.
   if (error instanceof Error && error.name === "TargetCloseError") return true;
   const message = error instanceof Error ? error.message : String(error);
   return CAPTURE_FATAL_MESSAGES.some(signature => signature.test(message));

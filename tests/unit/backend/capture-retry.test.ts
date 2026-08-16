@@ -70,12 +70,29 @@ describe("captureWithRetry, against Puppeteer's own error classes", () => {
     }
   });
 
-  it("still recognises TargetCloseError by the name it reports", () => {
-    // The class is exported at runtime but appears in no .d.ts, so the implementation
-    // matches error.name instead of using instanceof. If Puppeteer renames it, this
-    // fails here rather than quietly disabling that branch in production.
-    expect(new TargetCloseError("x").name).toBe("TargetCloseError");
-    expect(new TargetCloseError("x")).toBeInstanceOf(ProtocolError);
+  it("recognises TargetCloseError by class and by name", () => {
+    // The implementation tests instanceof first and error.name second. The name check is
+    // not redundant: two copies of puppeteer-core in a tree give two distinct class
+    // objects and instanceof fails against the copy the backend did not import. Both
+    // signals are asserted so neither can rot unnoticed.
+    const error = new TargetCloseError("x");
+    expect(error.name).toBe("TargetCloseError");
+    expect(error).toBeInstanceOf(ProtocolError);
+  });
+
+  it("refuses a look-alike that only carries the name", async () => {
+    // The name fallback must not become a way for an unrelated error to be treated as
+    // fatal. Only this exact name qualifies.
+    const impostor = new Error("Protocol error (Page.captureScreenshot): Internal error");
+    impostor.name = "TargetCloselike";
+    let calls = 0;
+    const png = new Uint8Array([1]);
+    const fn = async () => {
+      if (++calls === 1) throw impostor;
+      return png;
+    };
+    await expect(captureWithRetry(fn, 3, 0)).resolves.toBe(png);
+    expect(calls).toBe(2); // retried, not refused
   });
 
   it("retries a plain ProtocolError, which is the case this exists for", async () => {

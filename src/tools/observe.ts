@@ -10,9 +10,12 @@ export const screenshotTool: ToolDef = {
     "base64. If host_path is set, writes the image to that absolute path on disk and " +
     "returns only the path + byte count (useful when the image is too large to shuttle " +
     "through the tool channel). Not an atomic snapshot of the instant you called it: the " +
-    "guest keeps running, and a capture the browser refuses is retried, so the frame " +
-    "returned can be up to about half a second later than the request. That matters when " +
-    "comparing successive frames to decide whether something changed.",
+    "guest keeps running while the frame is captured, and a capture the browser refuses is " +
+    "retried, which adds up to 500ms of deliberate delay on top of however long the " +
+    "captures themselves take. There is no useful upper bound on that, since a refused " +
+    "attempt can take a long time to come back, so treat the frame as later than the " +
+    "request by an unknown amount. It matters when comparing successive frames to decide " +
+    "whether something changed, or when timing input against a capture.",
   inputSchema: {
     type: "object",
     properties: {
