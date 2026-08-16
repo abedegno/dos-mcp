@@ -1,7 +1,5 @@
 import { describe, it, expect } from "vitest";
-import * as fs from "node:fs";
-import { createRequire } from "node:module";
-import * as path from "node:path";
+import { _keyDefinitions } from "puppeteer-core";
 import { US_SHIFTED_BASE, shiftedBaseKey } from "../../../src/backend/jsdos";
 
 // US_SHIFTED_BASE names, for each character needing Shift, the physical key that
@@ -10,59 +8,43 @@ import { US_SHIFTED_BASE, shiftedBaseKey } from "../../../src/backend/jsdos";
 // single-character key names, where Puppeteer resolves '-' to NumpadSubtract and
 // '/' to NumpadDivide, so '_' was dropped entirely and '?' arrived as '/'.
 //
-// Puppeteer's own layout annotates each main-row key with the shifted character it
-// produces, e.g. Minus carries shiftKey: '_'. That is the same relationship this
-// table encodes, in reverse, so it can be checked rather than trusted.
-// Searched for rather than named by path. Puppeteer 25 went ESM-only and replaced
-// lib/esm and lib/cjs with lib/puppeteer, so a hardcoded path breaks on a version
-// bump even though the key definitions themselves did not change. Skips the bundled
-// third-party and es5-iife trees, where a copy would be minified or transformed.
-function findLayoutFile(root: string): string | null {
-  const wanted = ["USKeyboardLayout.js", "USKeyboardLayout.ts"];
-  const skip = new Set(["node_modules", "es5-iife", "third_party"]);
-  const found: string[] = [];
-  const stack = [root];
-  while (stack.length > 0) {
-    const dir = stack.pop()!;
-    for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, item.name);
-      if (item.isDirectory()) {
-        if (!skip.has(item.name)) stack.push(full);
-      } else if (wanted.includes(item.name)) {
-        found.push(full);
-      }
-    }
-  }
-  // Prefer the built .js. The .ts source is shipped too and carries the same
-  // annotations, so it is a usable fallback if the build layout changes again.
-  return found.find(p => p.endsWith(".js")) ?? found[0] ?? null;
-}
-
+// Puppeteer's own key table annotates each key with the shifted character it
+// produces, e.g. Minus carries shiftKey: '_'. That is the relationship this table
+// encodes, in reverse, so it can be checked rather than trusted.
+//
+// _keyDefinitions is imported rather than parsed out of Puppeteer's source on disk.
+// An earlier version of this test read lib/esm/.../USKeyboardLayout.js, which broke
+// on the 25.x bump: that release went ESM-only and replaced lib/esm and lib/cjs with
+// lib/puppeteer, even though the definitions themselves were unchanged. The export
+// is underscore-prefixed, so treat it as internal and fail loudly if it goes away,
+// rather than quietly checking nothing.
 function puppeteerShiftedToCode(): Map<string, string> {
-  const require = createRequire(import.meta.url);
-  const root = path.dirname(require.resolve("puppeteer-core/package.json"));
-  const layoutPath = findLayoutFile(root);
-  if (!layoutPath) {
+  const definitions = _keyDefinitions as Record<
+    string,
+    { code?: string; shiftKey?: string } | undefined
+  >;
+  if (!definitions || typeof definitions !== "object") {
     throw new Error(
-      `no USKeyboardLayout.js or .ts found under ${root}. Puppeteer stopped shipping ` +
-        `it; find where the key definitions live now rather than deleting this check.`,
+      "puppeteer-core no longer exports _keyDefinitions. Find where the key " +
+        "definitions live now rather than deleting this check.",
     );
   }
 
-  const source = fs.readFileSync(layoutPath, "utf8");
-  // Entries look like:
-  //   Minus: { keyCode: 189, code: 'Minus', shiftKey: '_', key: '-' },
-  const entry = /^\s*([A-Za-z][A-Za-z0-9]*):\s*\{[^}]*?shiftKey:\s*'((?:[^'\\]|\\.)+)'/gm;
+  // Keep only entries naming a physical key, identified by the entry's own name
+  // matching its code. Puppeteer also holds single-character aliases such as
+  // '-' -> { code: 'NumpadSubtract' }, and those are exactly the keypad entries
+  // that caused the original bug, so they must not be treated as the authority.
   const shiftedToCode = new Map<string, string>();
-  for (const match of source.matchAll(entry)) {
-    const code = match[1];
-    const shifted = match[2].replace(/\\(.)/g, "$1"); // unescape, e.g. \\ -> \
-    // Keep the first: the code-named block is the authoritative one, and later
-    // single-character aliases reuse the same shifted characters.
-    if (!shiftedToCode.has(shifted)) shiftedToCode.set(shifted, code);
+  for (const [name, definition] of Object.entries(definitions)) {
+    if (!definition || definition.code !== name) continue;
+    if (typeof definition.shiftKey !== "string") continue;
+    shiftedToCode.set(definition.shiftKey, name);
   }
   if (shiftedToCode.size < 20) {
-    throw new Error(`parsed only ${shiftedToCode.size} shiftKey entries, so the regex is wrong`);
+    throw new Error(
+      `found only ${shiftedToCode.size} keys annotated with a shifted character, ` +
+        `so the shape of _keyDefinitions changed`,
+    );
   }
   return shiftedToCode;
 }
