@@ -28,7 +28,10 @@
 
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import puppeteer, { Browser, Page } from "puppeteer";
+// The namespace as well as the default export: TargetCloseError is a named export, and the
+// default export is a PuppeteerNode instance that does not carry it.
+import puppeteer, * as puppeteerModule from "puppeteer";
+import { Browser, ConnectionClosedError, Page, TimeoutError } from "puppeteer";
 import type {
   Backend,
   BackendStatus,
@@ -123,19 +126,50 @@ export const CONTROL_KEYS: Record<string, string> = {
 // nine-minute one, and once the target or session is gone no number of attempts will
 // help. Everything else is treated as possibly transient and costs at most two extra
 // attempts and half a second.
-const CAPTURE_FATAL_SIGNATURES = [
+// Message patterns, kept as a fallback rather than as the primary test. One of them is
+// not optional: a CDP command timeout is NOT a TimeoutError. CallbackRegistry starts each
+// call with a ProtocolError and rewrites that same object when protocolTimeout expires, so
+// wording is the only signal available for the case that matters most to exclude.
+const CAPTURE_FATAL_MESSAGES = [
   /timed out/i, // protocolTimeout — already cost 180s, do not multiply it
   /target closed/i,
   /session closed/i,
+  /session with given id not found/i,
   /connection closed/i,
+  /page closed/i,
   /detached/i,
   /not loaded/i, // our own guard, not a CDP failure
 ];
 const CAPTURE_ATTEMPTS = 3;
 const CAPTURE_RETRY_DELAY_MS = 250;
 
-function captureFailureIsFatal(message: string): boolean {
-  return CAPTURE_FATAL_SIGNATURES.some(signature => signature.test(message));
+// TargetCloseError is the most useful class to exclude, covering a closed page and a
+// missing session whatever either is worded as. "puppeteer" exports the constructor at
+// runtime but omits it from its type declarations, so it is read here rather than imported.
+//
+// Deliberately not imported from puppeteer-core/internal/common/Errors.js, where it is
+// declared with types. That path is marked internal and may move within the ^25.x range
+// with no compatibility obligation, and because dist/ ships precompiled, a move would be a
+// module-resolution failure when the server starts rather than a compile error anyone here
+// would see first. Reading an optional property cannot fail that way: if the export ever
+// disappears this falls through to the name and message checks below.
+const runtimeTargetCloseError = (
+  puppeteerModule as unknown as { TargetCloseError?: new (message: string) => Error }
+).TargetCloseError;
+
+function captureFailureIsFatal(error: unknown): boolean {
+  // Structural where possible. Message text moves between versions, and 25.x already
+  // moved Puppeteer's own files under us once this month, so wording alone was the weak
+  // part of the first attempt.
+  if (error instanceof ConnectionClosedError) return true;
+  if (error instanceof TimeoutError) return true;
+  if (runtimeTargetCloseError && error instanceof runtimeTargetCloseError) return true;
+  // Name as well as class, and now load-bearing rather than superstition: it covers both a
+  // vanished runtime export and duplicate copies of puppeteer-core, either of which leaves
+  // instanceof unable to match. No other error is named this, so it cannot misfire.
+  if (error instanceof Error && error.name === "TargetCloseError") return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return CAPTURE_FATAL_MESSAGES.some(signature => signature.test(message));
 }
 
 // Separated from the backend so the retry policy can be tested without a browser:
@@ -147,28 +181,35 @@ export async function captureWithRetry(
   attempts: number = CAPTURE_ATTEMPTS,
   delayMs: number = CAPTURE_RETRY_DELAY_MS,
 ): Promise<Uint8Array> {
-  let lastError: unknown;
+  // Validated rather than assumed: a zero or negative count would skip the loop
+  // entirely and fall out of the bottom with nothing to throw.
+  if (!Number.isInteger(attempts) || attempts < 1) {
+    throw new Error(`captureWithRetry needs at least one attempt, got ${attempts}`);
+  }
+
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       return await capture();
     } catch (error) {
-      lastError = error;
       const message = error instanceof Error ? error.message : String(error);
-      if (captureFailureIsFatal(message)) throw error;
+      if (captureFailureIsFatal(error)) throw error;
       if (attempt === attempts) {
-        // Keep the original as the cause: the message a caller sees should say the
-        // retries happened, without hiding what actually failed.
+        // The original text goes in the message, not only in cause. An MCP client
+        // receives just a code and error.message: the SDK does not serialise cause,
+        // name or stack, so anything a caller needs has to be in the message itself.
+        // cause is still set, for a reader inside this process.
         throw new Error(
-          `screenshot failed after ${attempts} attempts: ${message}`,
+          `screenshot failed after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}: ${message}`,
           { cause: error },
         );
       }
       if (delayMs > 0) await new Promise<void>(r => setTimeout(r, delayMs));
     }
   }
-  // Unreachable: the loop either returns or throws. Present so the function has a
-  // definite end rather than an implicit undefined.
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  // Genuinely unreachable now that attempts is validated above: the loop returns, or
+  // throws on the last attempt. TypeScript cannot see that, so the function still needs
+  // a terminal statement.
+  throw new Error("captureWithRetry fell out of its retry loop");
 }
 
 // Whether send_keys can deliver a character as a keystroke.
