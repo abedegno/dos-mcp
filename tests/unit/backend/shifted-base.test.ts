@@ -13,18 +13,39 @@ import { US_SHIFTED_BASE, shiftedBaseKey } from "../../../src/backend/jsdos";
 // Puppeteer's own layout annotates each main-row key with the shifted character it
 // produces, e.g. Minus carries shiftKey: '_'. That is the same relationship this
 // table encodes, in reverse, so it can be checked rather than trusted.
+// Searched for rather than named by path. Puppeteer 25 went ESM-only and replaced
+// lib/esm and lib/cjs with lib/puppeteer, so a hardcoded path breaks on a version
+// bump even though the key definitions themselves did not change. Skips the bundled
+// third-party and es5-iife trees, where a copy would be minified or transformed.
+function findLayoutFile(root: string): string | null {
+  const wanted = ["USKeyboardLayout.js", "USKeyboardLayout.ts"];
+  const skip = new Set(["node_modules", "es5-iife", "third_party"]);
+  const found: string[] = [];
+  const stack = [root];
+  while (stack.length > 0) {
+    const dir = stack.pop()!;
+    for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, item.name);
+      if (item.isDirectory()) {
+        if (!skip.has(item.name)) stack.push(full);
+      } else if (wanted.includes(item.name)) {
+        found.push(full);
+      }
+    }
+  }
+  // Prefer the built .js. The .ts source is shipped too and carries the same
+  // annotations, so it is a usable fallback if the build layout changes again.
+  return found.find(p => p.endsWith(".js")) ?? found[0] ?? null;
+}
+
 function puppeteerShiftedToCode(): Map<string, string> {
   const require = createRequire(import.meta.url);
   const root = path.dirname(require.resolve("puppeteer-core/package.json"));
-  const candidates = [
-    path.join(root, "lib", "esm", "puppeteer", "common", "USKeyboardLayout.js"),
-    path.join(root, "lib", "cjs", "puppeteer", "common", "USKeyboardLayout.js"),
-  ];
-  const layoutPath = candidates.find(p => fs.existsSync(p));
+  const layoutPath = findLayoutFile(root);
   if (!layoutPath) {
     throw new Error(
-      `USKeyboardLayout.js not found under ${root}. Puppeteer moved it; update the ` +
-        `candidate paths here rather than deleting this check.`,
+      `no USKeyboardLayout.js or .ts found under ${root}. Puppeteer stopped shipping ` +
+        `it; find where the key definitions live now rather than deleting this check.`,
     );
   }
 
