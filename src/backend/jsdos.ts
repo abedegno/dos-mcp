@@ -56,6 +56,48 @@ const MAX_RELATIVE_DELTA = 30000;
 const DEFAULT_CLICK_HOLD_MS = 120;
 const MAX_CLICK_HOLD_MS = 10_000;
 
+// Each character needing Shift on a US layout, mapped to the Puppeteer key name of
+// the physical key that produces it. sendKeys presses that key with Shift held
+// rather than asking Puppeteer for the shifted character directly, for two reasons.
+//
+// First, Puppeteer gives a shifted character the same keyCode as its unshifted twin
+// and does not set shiftKey, relying on the event's text field, which a browser
+// uses to insert into a DOM input. The page bridge has no input to insert into: it
+// maps keyCode to a KBD_KEYS value, so the guest would see '.' for '>'.
+//
+// Second, several of Puppeteer's single-character aliases name a keypad key rather
+// than the main row: '+' is NumpadAdd (keyCode 107), which the page does not map at
+// all, so it was dropped outright; '*' is NumpadMultiply, '-' is NumpadSubtract and
+// '/' is NumpadDivide. A keypad key does not produce a shifted character, so naming
+// one silently yields the wrong character or nothing.
+//
+// Hence the code names below, e.g. Digit8 rather than '8'. Those are the entries
+// Puppeteer annotates with the shifted character they produce, which is exactly the
+// relationship wanted here, and keymap.test.ts checks every entry against them.
+//
+// This table is layout-specific. DOSBox defaults to a US layout and no bundle here
+// changes it, so US is correct for now; a bundle loading a different KEYB layout
+// would need the guest's layout consulted instead.
+export const US_SHIFTED_BASE: Record<string, string> = {
+  "~": "Backquote", "!": "Digit1", "@": "Digit2", "#": "Digit3",
+  "$": "Digit4", "%": "Digit5", "^": "Digit6", "&": "Digit7",
+  "*": "Digit8", "(": "Digit9", ")": "Digit0", "_": "Minus",
+  "+": "Equal", "{": "BracketLeft", "}": "BracketRight", "|": "Backslash",
+  ":": "Semicolon", '"': "Quote", "<": "Comma", ">": "Period", "?": "Slash",
+};
+
+// The key to press with Shift held, or null to type the character as-is.
+export function shiftedBaseKey(ch: string): string | null {
+  const punctuation = US_SHIFTED_BASE[ch];
+  if (punctuation !== undefined) return punctuation;
+  // Restricted to ASCII A-Z on purpose. A cased character outside it, e.g. 'İ',
+  // has no entry in Puppeteer's key table and falls through to insertText, which
+  // the page's keydown bridge never sees; holding Shift around it would emit a
+  // stray Shift press for a character the guest was never going to receive.
+  if (/^[A-Z]$/.test(ch)) return ch.toLowerCase();
+  return null;
+}
+
 export interface JsDosBackendOptions {
   headless: boolean;
 }
@@ -282,7 +324,23 @@ export class JsDosBackend implements Backend {
   async sendKeys(text: string, keyDelayMs = 10): Promise<void> {
     if (!this.page) throw new Error("not loaded");
     for (const ch of text) {
-      await this.page.keyboard.type(ch);
+      // Press the base key with Shift held where the character needs it, so the
+      // guest applies the shift itself: the Shift keydown is a real event for
+      // keyCode 16, which the page's map already turns into KBD_leftshift. See
+      // issue #31 and US_SHIFTED_BASE above.
+      const base = shiftedBaseKey(ch);
+      if (base === null) {
+        await this.page.keyboard.type(ch);
+      } else {
+        await this.page.keyboard.down("Shift");
+        try {
+          await this.page.keyboard.press(base as any);
+        } finally {
+          // Release even if the press throws. A latched Shift would otherwise
+          // corrupt every later key, since the page would never see the keyup.
+          await this.page.keyboard.up("Shift");
+        }
+      }
       if (keyDelayMs > 0) await new Promise<void>(r => setTimeout(r, keyDelayMs));
     }
   }
