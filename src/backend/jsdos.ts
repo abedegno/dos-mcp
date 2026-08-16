@@ -86,10 +86,113 @@ export const US_SHIFTED_BASE: Record<string, string> = {
   ":": "Semicolon", '"': "Quote", "<": "Comma", ">": "Period", "?": "Slash",
 };
 
+// Control characters Puppeteer has no key definition for, mapped to the key that
+// produces them. Puppeteer's table covers '\n' and '\r' as Enter but none of these, so
+// each fell through to insertText, which the page's keydown bridge never sees, and
+// send_keys did nothing at all for them.
+//
+// One control character is worse than dropped and is deliberately NOT here. Puppeteer
+// aliases '\0' to NumpadDecimal, keyCode 46, which the page maps to KBD_delete, so
+// send_keys("\0") pressed Delete in the guest. deliverableAsKeystroke refuses it along
+// with the other unmapped controls, which is why it must stay out of this table.
+export const CONTROL_KEYS: Record<string, string> = {
+  "\b": "Backspace",
+  "\t": "Tab",
+  "\x1b": "Escape",
+  "\x7f": "Delete",
+};
+
+// Page.captureScreenshot intermittently fails with a bare "Internal error" on long
+// sessions, and the failure currently ends the run, which for a driven DOS session
+// costs the whole emulator state and every step taken to reach it. See issue #28.
+//
+// The cause is NOT established. About 1040 captures across four counted configurations
+// failed to reproduce it: captures alone, captures interleaved with the evaluate-heavy
+// input traffic present in both real failures, three concurrent sessions, and one session
+// under full CPU saturation. A fifth run captured continuously across the canvas resize,
+// also without failing, but I did not count its captures. So this is survivability rather
+// than a cure, and #28 stays open.
+//
+// Retry by exclusion rather than by matching the one message that was reported. CDP has
+// more than one way to refuse a capture: "Unable to capture screenshot" was also
+// observed here, so an allow-list keyed on "Internal error" would have let a sibling
+// failure through, which is the same mistake as fixing '\t' and leaving '\b' broken.
+//
+// The exclusions are the cases where retrying is worse than failing. protocolTimeout
+// defaults to 180s, so retrying a hung capture turns a three-minute failure into a
+// nine-minute one, and once the target or session is gone no number of attempts will
+// help. Everything else is treated as possibly transient and costs at most two extra
+// attempts and half a second.
+const CAPTURE_FATAL_SIGNATURES = [
+  /timed out/i, // protocolTimeout — already cost 180s, do not multiply it
+  /target closed/i,
+  /session closed/i,
+  /connection closed/i,
+  /detached/i,
+  /not loaded/i, // our own guard, not a CDP failure
+];
+const CAPTURE_ATTEMPTS = 3;
+const CAPTURE_RETRY_DELAY_MS = 250;
+
+function captureFailureIsFatal(message: string): boolean {
+  return CAPTURE_FATAL_SIGNATURES.some(signature => signature.test(message));
+}
+
+// Separated from the backend so the retry policy can be tested without a browser:
+// what matters is which errors are retried, how many times, and that the original
+// error survives. Exercising that through a real Chromium would be slow and could not
+// produce the failure on demand anyway.
+export async function captureWithRetry(
+  capture: () => Promise<Uint8Array>,
+  attempts: number = CAPTURE_ATTEMPTS,
+  delayMs: number = CAPTURE_RETRY_DELAY_MS,
+): Promise<Uint8Array> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await capture();
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (captureFailureIsFatal(message)) throw error;
+      if (attempt === attempts) {
+        // Keep the original as the cause: the message a caller sees should say the
+        // retries happened, without hiding what actually failed.
+        throw new Error(
+          `screenshot failed after ${attempts} attempts: ${message}`,
+          { cause: error },
+        );
+      }
+      if (delayMs > 0) await new Promise<void>(r => setTimeout(r, delayMs));
+    }
+  }
+  // Unreachable: the loop either returns or throws. Present so the function has a
+  // definite end rather than an implicit undefined.
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+// Whether send_keys can deliver a character as a keystroke.
+//
+// Printable ASCII is covered either by Puppeteer's own key table or by US_SHIFTED_BASE
+// above; keystroke-coverage.test.ts checks that against Puppeteer's definitions rather
+// than assuming it. Everything else has no key on a US keyboard, so type() would fall
+// through to insertText and the guest would receive nothing.
+//
+// That silent nothing is the defect here, not the absence of a key. A caller asking
+// for a character DOS could not receive from a US keyboard anyway is better told so.
+export function deliverableAsKeystroke(ch: string): boolean {
+  // Object.hasOwn, not `in`: `in` would consult the prototype chain, and a single
+  // code point can never name an Object.prototype member today but nothing here
+  // depends on that staying true.
+  if (Object.hasOwn(CONTROL_KEYS, ch)) return true;
+  if (ch === "\n" || ch === "\r") return true; // Enter, per Puppeteer's table
+  const code = ch.codePointAt(0);
+  return code !== undefined && code >= 0x20 && code <= 0x7e;
+}
+
 // The key to press with Shift held, or null to type the character as-is.
 export function shiftedBaseKey(ch: string): string | null {
-  const punctuation = US_SHIFTED_BASE[ch];
-  if (punctuation !== undefined) return punctuation;
+  if (Object.hasOwn(US_SHIFTED_BASE, ch)) return US_SHIFTED_BASE[ch];
   // Restricted to ASCII A-Z on purpose. A cased character outside it, e.g. 'İ',
   // has no entry in Puppeteer's key table and falls through to insertText, which
   // the page's keydown bridge never sees; holding Shift around it would emit a
@@ -323,18 +426,37 @@ export class JsDosBackend implements Backend {
 
   async sendKeys(text: string, keyDelayMs = 10): Promise<void> {
     if (!this.page) throw new Error("not loaded");
+
+    // Checked over the whole string before typing any of it, so a rejected call
+    // leaves the guest untouched rather than half a command at the prompt. Reports
+    // every offending character, not just the first.
+    const undeliverable = [...text].filter(ch => !deliverableAsKeystroke(ch));
+    if (undeliverable.length > 0) {
+      const shown = [...new Set(undeliverable)].map(ch => JSON.stringify(ch)).join(", ");
+      throw new Error(
+        `send_keys cannot type ${shown}: no key on a US keyboard produces ` +
+          `${undeliverable.length === 1 ? "it" : "them"}, so the guest would receive ` +
+          `nothing. Use send_key_sequence for a named key such as F5 or an arrow, or ` +
+          `fs_write if the goal is to put these bytes in a file.`,
+      );
+    }
+
     for (const ch of text) {
       // Press the base key with Shift held where the character needs it, so the
       // guest applies the shift itself: the Shift keydown is a real event for
       // keyCode 16, which the page's map already turns into KBD_leftshift. See
       // issue #31 and US_SHIFTED_BASE above.
-      const base = shiftedBaseKey(ch);
-      if (base === null) {
+      // Control first: a control character is never in the shifted table, so
+      // resolving the base key before knowing that is wasted work.
+      const control = Object.hasOwn(CONTROL_KEYS, ch) ? CONTROL_KEYS[ch] : undefined;
+      if (control !== undefined) {
+        await this.page.keyboard.press(control as any);
+      } else if (shiftedBaseKey(ch) === null) {
         await this.page.keyboard.type(ch);
       } else {
         await this.page.keyboard.down("Shift");
         try {
-          await this.page.keyboard.press(base as any);
+          await this.page.keyboard.press(shiftedBaseKey(ch) as any);
         } finally {
           // Release even if the press throws. A latched Shift would otherwise
           // corrupt every later key, since the page would never see the keyup.
@@ -455,9 +577,10 @@ export class JsDosBackend implements Backend {
 
   async screenshot(format: "png" | "jpeg" = "png"): Promise<{ bytes: Buffer; mime: string }> {
     if (!this.page) throw new Error("not loaded");
-    const raw = await this.page.screenshot({ type: format });
+    const page = this.page;
+    const raw = await captureWithRetry(() => page.screenshot({ type: format }));
     return {
-      bytes: Buffer.from(raw as Uint8Array),
+      bytes: Buffer.from(raw),
       mime: format === "png" ? "image/png" : "image/jpeg",
     };
   }

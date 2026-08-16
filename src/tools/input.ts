@@ -3,7 +3,12 @@ import type { ToolDef } from "./index.js";
 
 export const sendKeysTool: ToolDef = {
   name: "send_keys",
-  description: "Inject a text sequence as keystrokes (e.g. 'hello\\n' or '{F5}{Enter}').",
+  description:
+    "Type literal text as keystrokes, one character at a time (e.g. 'DIR\\n'). There " +
+    "is no token or escape syntax: every character is sent as itself, so a key name " +
+    "wrapped in braces is typed as those characters instead of pressing that key. " +
+    "'\\n' is Enter and '\\t' is Tab; use send_key_sequence for any other named key, " +
+    "such as a function key or an arrow, and for a modifier combination.",
   inputSchema: {
     type: "object",
     required: ["text"],
