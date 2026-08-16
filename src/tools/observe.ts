@@ -6,7 +6,13 @@ import type { ToolDef } from "./index.js";
 export const screenshotTool: ToolDef = {
   name: "screenshot",
   description:
-    "Capture the current emulator frame as an image. By default returns the PNG bytes as base64. If host_path is set, writes the image to that absolute path on disk and returns only the path + byte count (useful when the image is too large to shuttle through the tool channel).",
+    "Capture the current emulator frame as an image. By default returns the PNG bytes as " +
+    "base64. If host_path is set, writes the image to that absolute path on disk and " +
+    "returns only the path + byte count (useful when the image is too large to shuttle " +
+    "through the tool channel). Not an atomic snapshot of the instant you called it: the " +
+    "guest keeps running, and a capture the browser refuses is retried, so the frame " +
+    "returned can be up to about half a second later than the request. That matters when " +
+    "comparing successive frames to decide whether something changed.",
   inputSchema: {
     type: "object",
     properties: {
