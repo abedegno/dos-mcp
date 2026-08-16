@@ -29,12 +29,9 @@
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import puppeteer, { Browser, ConnectionClosedError, Page, TimeoutError } from "puppeteer";
-// TargetCloseError is typed in puppeteer-core's own Errors.d.ts but is re-exported from
-// neither the bundled types.d.ts nor "puppeteer", so this deep path is the only way to
-// reach the class with types. The package's exports map provides ./internal/*, there is a
-// single copy of puppeteer-core installed, and the class object is identical to the one
-// "puppeteer" exports at runtime, so instanceof holds across both routes.
-import { TargetCloseError } from "puppeteer-core/internal/common/Errors.js";
+// The namespace as well as the default export: TargetCloseError is a named export, and the
+// default export is a PuppeteerNode instance that does not carry it.
+import * as puppeteerModule from "puppeteer";
 import type {
   Backend,
   BackendStatus,
@@ -146,19 +143,30 @@ const CAPTURE_FATAL_MESSAGES = [
 const CAPTURE_ATTEMPTS = 3;
 const CAPTURE_RETRY_DELAY_MS = 250;
 
+// TargetCloseError is the most useful class to exclude, covering a closed page and a
+// missing session whatever either is worded as. "puppeteer" exports the constructor at
+// runtime but omits it from its type declarations, so it is read here rather than imported.
+//
+// Deliberately not imported from puppeteer-core/internal/common/Errors.js, where it is
+// declared with types. That path is marked internal and may move within the ^25.x range
+// with no compatibility obligation, and because dist/ ships precompiled, a move would be a
+// module-resolution failure when the server starts rather than a compile error anyone here
+// would see first. Reading an optional property cannot fail that way: if the export ever
+// disappears this falls through to the name and message checks below.
+const runtimeTargetCloseError = (
+  puppeteerModule as unknown as { TargetCloseError?: new (message: string) => Error }
+).TargetCloseError;
+
 function captureFailureIsFatal(error: unknown): boolean {
   // Structural where possible. Message text moves between versions, and 25.x already
   // moved Puppeteer's own files under us once this month, so wording alone was the weak
   // part of the first attempt.
   if (error instanceof ConnectionClosedError) return true;
   if (error instanceof TimeoutError) return true;
-  // TargetCloseError covers a closed page and a missing session whatever either is worded
-  // as, which makes it the most useful class here.
-  if (error instanceof TargetCloseError) return true;
-  // Name as well as class, for the one case instanceof cannot cover: two copies of
-  // puppeteer-core in a tree give two distinct class objects, and instanceof then fails
-  // against the copy this module did not import. Costs nothing and cannot misfire, since
-  // no other error is named this.
+  if (runtimeTargetCloseError && error instanceof runtimeTargetCloseError) return true;
+  // Name as well as class, and now load-bearing rather than superstition: it covers both a
+  // vanished runtime export and duplicate copies of puppeteer-core, either of which leaves
+  // instanceof unable to match. No other error is named this, so it cannot misfire.
   if (error instanceof Error && error.name === "TargetCloseError") return true;
   const message = error instanceof Error ? error.message : String(error);
   return CAPTURE_FATAL_MESSAGES.some(signature => signature.test(message));
