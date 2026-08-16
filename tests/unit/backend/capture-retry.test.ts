@@ -224,6 +224,24 @@ describe("captureWithRetry", () => {
     }
   });
 
+  it("refuses a close message even on an error that is not a close class", async () => {
+    // Mutation testing found these two patterns unproven: every existing case carrying
+    // them was a real TargetCloseError, caught by the class check first. They are not
+    // redundant, though. They cover wording without a recognisable class, which is the
+    // same gap the exact-name check exists for, so they are tested rather than deleted.
+    for (const message of ["Page closed!", "Session with given id not found"]) {
+      const error = new Error(message);
+      Object.defineProperty(error, "name", { value: "SomethingElse" });
+      let calls = 0;
+      const fn = async () => {
+        calls++;
+        throw error;
+      };
+      await expect(captureWithRetry(fn, 3, 0)).rejects.toThrow(message);
+      expect(calls, `retried "${message}"`).toBe(1);
+    }
+  });
+
   it("does not retry a failure that cannot recover", async () => {
     // The exclusions, and why each one is excluded. A timeout has already cost the
     // 180s protocolTimeout before it is seen, so retrying triples that; a closed
