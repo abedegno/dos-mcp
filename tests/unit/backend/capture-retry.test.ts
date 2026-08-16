@@ -49,6 +49,22 @@ describe("captureWithRetry, against Puppeteer's own error classes", () => {
     };
   }
 
+  it("refuses a closed connection identified only by its class", async () => {
+    // Isolates the ConnectionClosedError branch. Its usual message, "Connection closed",
+    // is also matched by /connection closed/i, so with that wording the branch could be
+    // deleted and every test would still pass. Mutation testing showed exactly that, so
+    // the wording here matches no pattern and only the class remains.
+    const error = new ConnectionClosedError("wording nobody has used yet");
+    Object.defineProperty(error, "name", { value: "SomethingElse" });
+    let calls = 0;
+    const fn = async () => {
+      calls++;
+      throw error;
+    };
+    await expect(captureWithRetry(fn, 3, 0)).rejects.toThrow("wording nobody has used yet");
+    expect(calls, "retried despite being a ConnectionClosedError").toBe(1);
+  });
+
   it("does not retry a closed connection or a timeout", async () => {
     for (const error of [
       new ConnectionClosedError("Connection closed"),
@@ -109,6 +125,23 @@ describe("captureWithRetry, against Puppeteer's own error classes", () => {
     const error = new TargetCloseError("x");
     expect(error.name).toBe("TargetCloseError");
     expect(error).toBeInstanceOf(ProtocolError);
+  });
+
+  it("refuses a plain Error whose name is exactly TargetCloseError", async () => {
+    // Isolates the name branch, which mutation testing showed was masked. Real
+    // TargetCloseError instances are caught by the class check first, and the look-alike
+    // test below covers only the negative, so nothing exercised this positive path. It
+    // exists for a withdrawn runtime export or duplicate puppeteer-core copies, where the
+    // class check cannot match and the error is not a real TargetCloseError object.
+    const error = new Error("wording nobody has used yet");
+    error.name = "TargetCloseError";
+    let calls = 0;
+    const fn = async () => {
+      calls++;
+      throw error;
+    };
+    await expect(captureWithRetry(fn, 3, 0)).rejects.toThrow("wording nobody has used yet");
+    expect(calls, "retried an error named TargetCloseError").toBe(1);
   });
 
   it("refuses a look-alike that only carries the name", async () => {

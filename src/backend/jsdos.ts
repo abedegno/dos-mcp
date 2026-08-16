@@ -28,10 +28,10 @@
 
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import puppeteer, { Browser, ConnectionClosedError, Page, TimeoutError } from "puppeteer";
 // The namespace as well as the default export: TargetCloseError is a named export, and the
 // default export is a PuppeteerNode instance that does not carry it.
-import * as puppeteerModule from "puppeteer";
+import puppeteer, * as puppeteerModule from "puppeteer";
+import { Browser, ConnectionClosedError, Page, TimeoutError } from "puppeteer";
 import type {
   Backend,
   BackendStatus,
