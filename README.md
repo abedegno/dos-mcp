@@ -20,7 +20,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for release history.
 
 ## Install
 
-Not yet on npm. Clone and build:
+Needs Node 22.13 or newer. Not yet on npm, so clone and build:
 
 ```bash
 git clone https://github.com/abedegno/dos-mcp.git
@@ -28,6 +28,16 @@ cd dos-mcp
 npm install
 npm run build
 ```
+
+`npm install` downloads a Chrome build for Puppeteer. Behind an HTTP proxy that
+download needs `proxy-agent`, which is no longer installed for you:
+
+```bash
+npm install proxy-agent
+```
+
+Puppeteer 25 made it an optional peer dependency, so `HTTP_PROXY` and `HTTPS_PROXY`
+are ignored until it is present and the download fails without saying why.
 
 ## Use
 
