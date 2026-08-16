@@ -10,7 +10,7 @@ Built for reverse-engineering and retro-porting work, where the AI needs to inte
 
 ## Status
 
-**Phase 1 (v0.1.0):** 16 tools — session control, input, observation, filesystem. Usable today.
+**Phase 1 (v0.1.0):** 19 tools — session control, input, observation, filesystem. Usable today.
 
 **Phase 2 (planned):** memory inspection (`read_memory(seg, off)`) and save-state snapshot/restore. These are the features that unlock byte-level debugging against a running DOS emulator — the motivating use case for the whole project.
 
@@ -83,10 +83,12 @@ Restart your client. The AI will see the tools below in its tool list.
 
 | Tool | Description |
 |---|---|
-| `send_keys(text, key_delay_ms?)` | Inject a text sequence as keystrokes. |
+| `send_keys(text, key_delay_ms?)` | Type literal text. `\n` is Enter and `\t` is Tab; there is no token syntax. |
 | `send_key_sequence(keys)` | Named-key sequence with modifier support (e.g. `["Ctrl+F5", "Escape", "ArrowUp"]`). |
-| `send_click(x, y, button?)` | Click at canvas-relative coordinates. |
+| `send_click(x, y, button?)` | Click at canvas-relative coordinates. Moves there first, so it discards a position set by `move_mouse_relative`. |
 | `move_mouse(x, y)` | Move the cursor without clicking. |
+| `move_mouse_relative(dx, dy)` | Move by a relative delta. Needed for games that track the cursor from INT 33h deltas rather than reading the absolute position, which includes Ultima Underworld. |
+| `click_at_cursor(button?, hold_ms?)` | Press and release where the cursor already is, holding for `hold_ms` (default 120) so a slow-polling guest sees it. |
 
 ### Observation
 
@@ -102,6 +104,7 @@ Restart your client. The AI will see the tools below in its tool list.
 | `fs_read(dos_path)` | Read a file from the virtual DOS FS. |
 | `fs_write(dos_path, bytes_base64)` | Write a file to the virtual DOS FS. |
 | `fs_list(dos_path)` | List a directory (returns `{ name, size, is_dir }[]`). |
+| `fs_stat(dos_path)` | Stat one entry without listing its parent. |
 | `fs_delete(dos_path)` | Delete a file. |
 | `fs_push_dir(host_path, dos_path)` | Recursively copy a host dir into the virtual DOS FS. |
 | `fs_pull_dir(dos_path, host_path)` | Recursively copy a virtual DOS FS subtree to host. |
@@ -112,19 +115,43 @@ Paths accept `C:/FOO/BAR.DAT`, `C:\FOO\BAR.DAT`, or `/FOO/BAR.DAT` (forward-slas
 ## Example: round-trip a DOS save file
 
 ```
-1. load_bundle(source="/path/to/UW1", autoexec=["UW.EXE"])
-2. fs_push_dir(host_path="/path/to/port-saves/SAVE1", dos_path="C:/SAVE1")
-3. screenshot()         # AI sees the title screen
-4. send_keys("{Enter}")  # Journey Onwards
-5. send_click(x=..., y=...)   # pick slot 1
-6. wait(2000); screenshot()   # verify the restore landed
-7. send_keys(...movement keys...)
-8. send_keys(...save menu...)
-9. fs_pull_dir(dos_path="C:/SAVE2", host_path="/path/to/dos-saves")
-10. shutdown()
+1.  load_bundle(source="/path/to/UW1", autoexec=["UW.EXE"])
+2.  fs_push_dir(host_path="/path/to/port-saves/SAVE1", dos_path="C:/SAVE1")
+3.  send_key_sequence(["Escape"]) x3, with ~2500ms waits   # title and intro
+4.  screenshot()                                  # confirm the main menu
+5.  move_mouse_relative(dx=-4000, dy=-4000)       # clamp into the corner
+6.  move_mouse_relative(dx=320, dy=322)           # "Journey Onward"
+7.  click_at_cursor(hold_ms=200)
+8.  wait(2000); screenshot()                      # the save slot list
+9.  ... corner-slam again, then click slot 1 at about (320, 210)
+10. wait(2000); screenshot()                      # verify the restore landed
+11. fs_pull_dir(dos_path="C:/SAVE2", host_path="/path/to/dos-saves")
+12. shutdown()
 ```
 
-Then the host process can byte-diff the port-written `SAVE1` vs the DOS-written `SAVE2` to spot format drift.
+Then the host process can byte-diff the port-written `SAVE1` against the DOS-written
+`SAVE2` to spot format drift.
+
+Three things in that sequence are not obvious, and each one cost real time to find:
+
+- **`send_keys` types literal text.** `send_keys("{Enter}")` types seven characters.
+  Named keys go through `send_key_sequence`.
+- **Absolute mouse motion cannot position UW's cursor.** UW reads INT 33h function
+  0x0B and accumulates relative mickeys into its own tracker, ignoring the absolute
+  position function 0x03 reports, so `send_click` and `move_mouse` cannot place it.
+  Clamp into a corner with a large negative delta, then move by the target offset.
+  The 1:1 correspondence between delta and frame pixel is measured for UW at default
+  sensitivity, not guaranteed in general, so check a screenshot rather than trusting
+  the arithmetic.
+- **A click has to be held across real time.** `click_at_cursor` defaults to 120ms
+  because a press and release in the same instant is missed entirely: the guest polls
+  the mouse and the emulator never ticks between two near-identical timestamps.
+
+Judging the result from screenshots needs care too. Frames only push when the buffer
+changes, so a still frame is not proof of a hung guest, and UW's menus animate the
+background palette by roughly 2.5% of pixels, so comparing image hashes reports a
+difference for every frame while telling you nothing. Compare the fraction of changed
+pixels instead, and treat anything under about 5% as no change.
 
 ## Architecture
 

@@ -86,6 +86,12 @@ export const US_SHIFTED_BASE: Record<string, string> = {
   ":": "Semicolon", '"': "Quote", "<": "Comma", ">": "Period", "?": "Slash",
 };
 
+// Control characters Puppeteer has no key definition for, mapped to the key that
+// produces them. Puppeteer's table covers '\n' and '\r' as Enter, but nothing for
+// '\t', so a tab would fall through to insertText, which the page's keydown bridge
+// never sees, and send_keys("\t") did nothing at all.
+export const CONTROL_KEYS: Record<string, string> = { "\t": "Tab" };
+
 // The key to press with Shift held, or null to type the character as-is.
 export function shiftedBaseKey(ch: string): string | null {
   const punctuation = US_SHIFTED_BASE[ch];
@@ -328,8 +334,11 @@ export class JsDosBackend implements Backend {
       // guest applies the shift itself: the Shift keydown is a real event for
       // keyCode 16, which the page's map already turns into KBD_leftshift. See
       // issue #31 and US_SHIFTED_BASE above.
+      const control = CONTROL_KEYS[ch];
       const base = shiftedBaseKey(ch);
-      if (base === null) {
+      if (control !== undefined) {
+        await this.page.keyboard.press(control as any);
+      } else if (base === null) {
         await this.page.keyboard.type(ch);
       } else {
         await this.page.keyboard.down("Shift");
