@@ -49,6 +49,59 @@ describe("js-dos integration — control characters", () => {
     }
   }, 60000); // Chromium launch + js-dos boot
 
+  it("sends a backspace, which the DOS shell uses to erase", async () => {
+    // Typed name is one character too long; the backspace removes it. If the
+    // backspace were dropped the shell would create WRONGNAM, which is a legal 8.3
+    // name, so both outcomes exist and the two assertions distinguish them.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dos-mcp-bs-"));
+    try {
+      const be = new JsDosBackend({ headless: true });
+      try {
+        await be.loadBundle({ source: tmp });
+        await be.wait(2000);
+
+        await be.sendKeys("MD WRONGNAM\b\n");
+        await be.wait(900);
+
+        const names = (await be.fsList("C:/")).map(e => e.name.toUpperCase());
+        expect(names).toContain("WRONGNA");
+        expect(names).not.toContain("WRONGNAM");
+      } finally {
+        await be.shutdown();
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }, 60000);
+
+  it("refuses a character it cannot deliver, instead of dropping it", async () => {
+    // The whole string is checked before anything is typed, so a rejected call must
+    // leave the prompt untouched rather than half a command sitting on it.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dos-mcp-reject-"));
+    try {
+      const be = new JsDosBackend({ headless: true });
+      try {
+        await be.loadBundle({ source: tmp });
+        await be.wait(2000);
+
+        await expect(be.sendKeys("MD CAF\u00c9\n")).rejects.toThrow(/cannot type/);
+        await be.wait(400);
+
+        // Nothing typed, so submitting now runs only what follows.
+        await be.sendKeys("MD CLEAN\n");
+        await be.wait(900);
+
+        const names = (await be.fsList("C:/")).map(e => e.name.toUpperCase());
+        expect(names).toContain("CLEAN");
+        expect(names.some(n => n.startsWith("MD"))).toBe(false);
+      } finally {
+        await be.shutdown();
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }, 60000);
+
   it("sends a newline as Enter", async () => {
     // Covered incidentally by every other test that ends a command with a newline, but
     // asserted here so the pair '\n' and '\t' is stated in one place.

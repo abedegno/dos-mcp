@@ -87,10 +87,31 @@ export const US_SHIFTED_BASE: Record<string, string> = {
 };
 
 // Control characters Puppeteer has no key definition for, mapped to the key that
-// produces them. Puppeteer's table covers '\n' and '\r' as Enter, but nothing for
-// '\t', so a tab would fall through to insertText, which the page's keydown bridge
-// never sees, and send_keys("\t") did nothing at all.
-export const CONTROL_KEYS: Record<string, string> = { "\t": "Tab" };
+// produces them. Puppeteer's table covers '\n' and '\r' as Enter but none of these,
+// so each fell through to insertText, which the page's keydown bridge never sees, and
+// send_keys did nothing at all for them.
+export const CONTROL_KEYS: Record<string, string> = {
+  "\b": "Backspace",
+  "\t": "Tab",
+  "\x1b": "Escape",
+  "\x7f": "Delete",
+};
+
+// Whether send_keys can deliver a character as a keystroke.
+//
+// Printable ASCII is covered either by Puppeteer's own key table or by US_SHIFTED_BASE
+// above; keystroke-coverage.test.ts checks that against Puppeteer's definitions rather
+// than assuming it. Everything else has no key on a US keyboard, so type() would fall
+// through to insertText and the guest would receive nothing.
+//
+// That silent nothing is the defect here, not the absence of a key. A caller asking
+// for a character DOS could not receive from a US keyboard anyway is better told so.
+export function deliverableAsKeystroke(ch: string): boolean {
+  if (ch in CONTROL_KEYS) return true;
+  if (ch === "\n" || ch === "\r") return true; // Enter, per Puppeteer's table
+  const code = ch.codePointAt(0);
+  return code !== undefined && code >= 0x20 && code <= 0x7e;
+}
 
 // The key to press with Shift held, or null to type the character as-is.
 export function shiftedBaseKey(ch: string): string | null {
@@ -329,6 +350,21 @@ export class JsDosBackend implements Backend {
 
   async sendKeys(text: string, keyDelayMs = 10): Promise<void> {
     if (!this.page) throw new Error("not loaded");
+
+    // Checked over the whole string before typing any of it, so a rejected call
+    // leaves the guest untouched rather than half a command at the prompt. Reports
+    // every offending character, not just the first.
+    const undeliverable = [...text].filter(ch => !deliverableAsKeystroke(ch));
+    if (undeliverable.length > 0) {
+      const shown = [...new Set(undeliverable)].map(ch => JSON.stringify(ch)).join(", ");
+      throw new Error(
+        `send_keys cannot type ${shown}: no key on a US keyboard produces ` +
+          `${undeliverable.length === 1 ? "it" : "them"}, so the guest would receive ` +
+          `nothing. Use send_key_sequence for a named key such as F5 or an arrow, or ` +
+          `fs_write if the goal is to put these bytes in a file.`,
+      );
+    }
+
     for (const ch of text) {
       // Press the base key with Shift held where the character needs it, so the
       // guest applies the shift itself: the Shift keydown is a real event for
