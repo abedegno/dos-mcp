@@ -18,6 +18,11 @@ Nothing is released from this section yet; it records what has landed on `main` 
   `DOSMCP_JSDOS_DIR` still wins when set, and now fails loudly if it points somewhere
   without an `emulators.js` rather than quietly downgrading to the CDN. Falling back
   logs which directories were searched.
+- `dos-pull.mjs`, `dos-push.mjs` and `dos-shot.mjs`, which attach to a running session and
+  read or write the emulated filesystem without restarting it. A restart rebuilds that
+  filesystem from disk and loses anything the guest wrote, which made a save produced
+  inside DOS awkward to get at. `dos-push.mjs` reads each file back after writing, because
+  a push into a slot the game has never created reports success and does nothing.
 - `move_mouse_relative(dx, dy)` and `click_at_cursor(button?, hold_ms?)` — needed for
   games that track the cursor from INT 33h relative deltas rather than reading the
   absolute position, which includes Ultima Underworld. An absolute move is only ever
