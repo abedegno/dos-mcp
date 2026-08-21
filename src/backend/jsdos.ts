@@ -27,6 +27,7 @@
  */
 
 import * as path from "node:path";
+import { statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 // The namespace as well as the default export: TargetCloseError is a named export, and the
 // default export is a PuppeteerNode instance that does not carry it.
@@ -246,6 +247,77 @@ export interface JsDosBackendOptions {
   headless: boolean;
 }
 
+/**
+ * Where js-dos is loaded from.
+ *
+ * The CDN only ever serves a moving /latest/, so a build that works today can break
+ * tomorrow with nothing edited: that is exactly how 8.4.x silently changed the mouse
+ * coordinate convention underneath this bridge. A local build is also the only way to
+ * carry our own emulator patches. Falling back to the CDN without saying so has cost
+ * real debugging time, so the choice is resolved explicitly and always reported.
+ */
+export type JsDosSource =
+  | { dir: string; origin: "env" }
+  | { dir: string; origin: "auto"; searched: string[] }
+  | { dir: null; origin: "cdn"; searched: string[] };
+
+/** Conventional places to find a locally built emulators dist, relative to the repo. */
+export function jsDosSearchPaths(repoRoot: string): string[] {
+  const parent = path.dirname(repoRoot);
+  return [
+    path.join(repoRoot, "jsdos-dist"),
+    path.join(parent, "emulators-dist"),
+    path.join(parent, "emulators", "dist"),
+  ];
+}
+
+/** A dist is usable only if it actually carries the loader the page asks for. */
+export function isUsableJsDosDir(dir: string): boolean {
+  try {
+    return statSync(path.join(dir, "emulators.js")).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * DOSMCP_JSDOS_DIR wins when set, and a bad value is fatal rather than a silent
+ * downgrade to the CDN: someone who set it meant to use it. Otherwise look in the
+ * conventional locations, and only then fall back.
+ */
+export function resolveJsDosSource(
+  env: NodeJS.ProcessEnv = process.env,
+  repoRoot: string = path.resolve(__dirname, "..", ".."),
+  usable: (dir: string) => boolean = isUsableJsDosDir
+): JsDosSource {
+  const explicit = env.DOSMCP_JSDOS_DIR?.trim();
+  if (explicit) {
+    if (!usable(explicit)) {
+      throw new Error(
+        `DOSMCP_JSDOS_DIR is set to ${explicit} but there is no emulators.js there. ` +
+          `Point it at a built emulators dist, or unset it to use the CDN.`
+      );
+    }
+    return { dir: explicit, origin: "env" };
+  }
+
+  const searched = jsDosSearchPaths(repoRoot);
+  const found = searched.find(usable);
+  return found
+    ? { dir: found, origin: "auto", searched }
+    : { dir: null, origin: "cdn", searched };
+}
+
+export function describeJsDosSource(src: JsDosSource): string {
+  if (src.origin === "env") return `dos-mcp: js-dos from ${src.dir} (DOSMCP_JSDOS_DIR)`;
+  if (src.origin === "auto") return `dos-mcp: js-dos from ${src.dir} (found automatically)`;
+  return (
+    "dos-mcp: js-dos from the CDN, which serves a moving /latest/ and carries none of " +
+    "our emulator patches. Set DOSMCP_JSDOS_DIR to a built dist to pin it. Looked in: " +
+    src.searched.join(", ")
+  );
+}
+
 export class JsDosBackend implements Backend {
   private browser?: Browser;
   private page?: Page;
@@ -318,11 +390,13 @@ export class JsDosBackend implements Backend {
     this.page = await this.browser.newPage();
     await this.page.setViewport({ width: 640, height: 400 });
 
-    // Serve the page over http so it can be cross-origin isolated. When
-    // DOSMCP_JSDOS_DIR points at a locally built emulators dist, serve that too
-    // and tell the page to load js-dos from there instead of the CDN, which only
-    // ever offers a moving /latest/.
-    const localDist = process.env.DOSMCP_JSDOS_DIR;
+    // Serve the page over http so it can be cross-origin isolated. When we have a
+    // locally built emulators dist, serve that too and tell the page to load js-dos
+    // from there instead of the CDN, which only ever offers a moving /latest/.
+    const jsdos = resolveJsDosSource();
+    console.error(describeJsDosSource(jsdos));
+
+    const localDist = jsdos.dir;
     const roots: Record<string, string> = { "/": __dirname };
     if (localDist) roots["/jsdos/"] = localDist;
     this.staticServer = await startStaticServer(roots, Boolean(localDist));

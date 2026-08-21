@@ -159,6 +159,35 @@ the animation does, so a cutoff chosen to ignore the animation will also ignore 
 Prefer a reference frame for each outcome you care about and ask which one a capture is
 closer to.
 
+## Attaching to a running session
+
+The emulated DOS filesystem lives inside the browser the server owns. Restarting rebuilds
+it from the host directory, which destroys anything DOS itself wrote, so reading a save the
+guest produced means attaching to the live process instead of relaunching. Three scripts do
+that. They need a session already running, and they leave it running.
+
+```
+node dos-pull.mjs <label> [outDir]   # copy save slots out to <outDir>/<label>/SAVE1/...
+node dos-push.mjs <dir> [slot]       # copy a save in, default slot SAVE1
+node dos-shot.mjs [out.png]          # screenshot, and report whether the guest is drawing
+```
+
+`dos-pull.mjs` writes to `./dos-saves` unless you pass a directory or set `DOS_SAVES_DIR`.
+
+Together they make a byte-level bisection loop practical: pull a save the guest wrote, edit
+it on the host, push it back, reload the slot from the game's own menu, and repeat, without
+ever restarting the emulator.
+
+Save slots sit at the root of the mount, as `SAVE1/LEV.ARK` rather than `C:\GAME\SAVE1`.
+A push into a slot the game has never created reports success and does nothing, so
+`dos-push.mjs` reads each file back and fails if it did not land. Save to a slot once from
+inside the game before pushing to it.
+
+`dos-shot.mjs` takes two frames a moment apart. Identical frames mean idle or hung, because
+DOSBox only pushes a frame when the screen changes. It also asks the emulator for its
+filesystem, which separates the two cases that matter: a guest ignoring all input while the
+emulator still answers is hung on its own account, not dead underneath.
+
 ## Architecture
 
 ```
