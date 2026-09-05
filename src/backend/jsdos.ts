@@ -385,6 +385,10 @@ export class JsDosBackend implements Backend {
         // worker.  The page is served with COOP/COEP so it is genuinely
         // cross-origin isolated, but keep the flag for older Chromium builds.
         "--enable-features=SharedArrayBuffer",
+        // Chromium suspends an AudioContext until a user gesture. An attended
+        // session can click, but a headless one never can, so allow it there.
+        // Without this the audio bridge in the page starts and stays suspended.
+        "--autoplay-policy=no-user-gesture-required",
       ],
     });
     this.page = await this.browser.newPage();

@@ -168,6 +168,71 @@
         ci.onFrame(drawFrame);
       }
 
+      // --- audio bridge ----------------------------------------------------
+      // js-dos produces samples and hands them to onSoundPush; without this they
+      // were dropped and every session was silent. See issue #48.
+      //
+      // The shape is not guessable and getting it wrong sounds terrible rather
+      // than silent, so it follows what js-dos's own player does: MONO Float32
+      // at a fixed 44100, from its worklet node declared with
+      // outputChannelCount [1] and a context it refuses to run at any other rate.
+      //
+      // Deliberately defensive: audio is a convenience for a human watching an
+      // attended session, while frames, input and screenshots are what the MCP
+      // tools depend on. Nothing here may throw into the caller.
+      (function attachAudio() {
+        if (!events || typeof events.onSoundPush !== "function") {
+          window.__dosmcp.audio = { state: "unsupported" };
+          return;
+        }
+        const RATE = 44100;
+        const LEAD = 0.08;     // seconds of cushion, so a late push does not gap
+        let actx = null;
+        let next = 0;
+        let pushes = 0;
+
+        window.__dosmcp.audio = {
+          state: "idle", rate: RATE, pushes: 0, dropped: 0,
+          resume() {
+            try { if (actx && actx.state === "suspended") { actx.resume(); } } catch (e) {}
+            return actx ? actx.state : "none";
+          },
+        };
+
+        // Chromium suspends a context until a user gesture, so an attended
+        // session needs a click. Headless runs get --autoplay-policy instead.
+        const wake = () => { try { window.__dosmcp.audio.resume(); } catch (e) {} };
+        document.addEventListener("pointerdown", wake, { passive: true });
+        document.addEventListener("keydown", wake, { passive: true });
+
+        events.onSoundPush((samples) => {
+          try {
+            if (!samples || !samples.length) { return; }
+            if (actx === null) {
+              actx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: RATE });
+              window.__dosmcp.audio.state = actx.state;
+              window.__dosmcp.audio.contextRate = actx.sampleRate;
+            }
+            const buf = actx.createBuffer(1, samples.length, RATE);
+            buf.getChannelData(0).set(samples);
+            const src = actx.createBufferSource();
+            src.buffer = buf;
+            src.connect(actx.destination);
+            const now = actx.currentTime;
+            // Rebuild the cushion if we have fallen behind, rather than starting
+            // in the past, which drops the buffer and clicks.
+            if (next < now + 0.005) { next = now + LEAD; window.__dosmcp.audio.dropped++; }
+            src.start(next);
+            next += buf.duration;
+            pushes++;
+            window.__dosmcp.audio.pushes = pushes;
+            window.__dosmcp.audio.state = actx.state;
+          } catch (err) {
+            window.__dosmcp.audio.state = "error: " + (err && err.message);
+          }
+        });
+      })();
+
       // --- keyboard bridge -------------------------------------------------
       // Bind at document level so Puppeteer's top-level keyboard.press works
       // regardless of which element has focus.
