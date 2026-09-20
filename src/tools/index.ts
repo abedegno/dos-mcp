@@ -9,6 +9,7 @@ import {
   clickAtCursorTool,
 } from "./input.js";
 import { screenshotTool, getStatusTool } from "./observe.js";
+import { readMemoryTool, searchMemoryTool } from "./memory.js";
 import {
   fsReadTool,
   fsWriteTool,
@@ -47,4 +48,6 @@ export const tools: ToolDef[] = [
   fsPushDirTool,
   fsPullDirTool,
   fsSyncTool,
+  readMemoryTool,
+  searchMemoryTool,
 ];

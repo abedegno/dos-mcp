@@ -10,7 +10,7 @@ Built for reverse-engineering and retro-porting work, where the AI needs to inte
 
 ## Status
 
-**Phase 1 (v0.1.0):** 19 tools — session control, input, observation, filesystem. Usable today.
+**Phase 1 (v0.1.0):** 21 tools — session control, input, observation, filesystem, guest memory. Usable today.
 
 **Phase 2 (planned):** memory inspection (`read_memory(seg, off)`) and save-state snapshot/restore. These are the features that unlock byte-level debugging against a running DOS emulator — the motivating use case for the whole project.
 
@@ -109,6 +109,19 @@ Restart your client. The AI will see the tools below in its tool list.
 | `fs_push_dir(host_path, dos_path)` | Recursively copy a host dir into the virtual DOS FS. |
 | `fs_pull_dir(dos_path, host_path)` | Recursively copy a virtual DOS FS subtree to host. |
 | `fs_sync()` | Flush any pending mirrored writes to their host dirs. |
+
+### Guest memory (read-only)
+
+| Tool | Description |
+|---|---|
+| `read_memory(address \| segment+offset, length)` | Read the guest's emulated DOS memory. Returns base64. |
+| `search_memory(pattern_base64, max_hits?, start?, end?)` | Find a byte pattern in guest memory, returning physical addresses. |
+
+Addresses are DOS physical. A disassembly's real-mode `seg:off` can be passed as `segment` and `offset` instead, which is `segment * 16 + offset`.
+
+`search_memory` exists because a segment base is usually not known in advance: search for content you know is loaded, then read relative to the hit. The scan runs beside the memory in the browser, so nothing large is transferred.
+
+The upper bound on a read is the emulator's wasm heap rather than the guest's configured RAM, which is not discoverable from outside. Reading far above the guest's memory returns emulator internals rather than failing. Conventional memory, which is what real-mode addresses cover, is always well inside the valid range.
 
 Paths accept `C:/FOO/BAR.DAT`, `C:\FOO\BAR.DAT`, or `/FOO/BAR.DAT` (forward-slash unix-style, drive-prefix optional). They're normalised internally.
 
