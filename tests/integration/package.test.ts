@@ -48,8 +48,23 @@ describe("published package", () => {
       const binLink = path.join(consumer, "node_modules", ".bin", "dos-mcp");
       expect(fs.existsSync(binLink)).toBe(true);
 
-      const entry = path.join(consumer, "node_modules", "dos-mcp", "dist", "server.js");
-      const child = spawn(process.execPath, [entry], { stdio: ["pipe", "pipe", "pipe"] });
+      // resolveJsDosSource() is the one thing this branch changed, and initialize
+      // never reaches connect(), so it is never exercised by the JSON-RPC exchange
+      // below. Prove separately, in the installed layout, that it resolves to the
+      // package rather than silently falling through to nothing.
+      const probe = path.join(consumer, "probe.mjs");
+      fs.writeFileSync(
+        probe,
+        `import { resolveJsDosSource } from "dos-mcp/dist/backend/jsdos.js";\n` +
+          `const src = resolveJsDosSource();\n` +
+          `console.log(JSON.stringify(src));\n`
+      );
+      const probeOut = execFileSync(process.execPath, [probe], { cwd: consumer, encoding: "utf8" });
+      const resolved = JSON.parse(probeOut.trim());
+      expect(resolved.origin).toBe("package");
+      expect(resolved.dir).toContain("emulators");
+
+      const child = spawn(binLink, [], { stdio: ["pipe", "pipe", "pipe"] });
       try {
         const reply = await new Promise<string>((resolve, reject) => {
           let out = "";

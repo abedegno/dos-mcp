@@ -1,11 +1,10 @@
 /**
  * JsDosBackend — Puppeteer + js-dos v8 implementation of the Backend interface.
  *
- * emulators package: 8.4.x. The CDN only ever serves /latest/ (there are no
- * versioned paths), so set DOSMCP_JSDOS_DIR to a locally built dist to pin it.
- * Do not restate a version here without checking: this header claimed 8.3.9
- * long after /latest/ had moved to 8.4.1, and 8.4.x changed sendMouseMotion
- * from canvas pixels to normalized 0..1, which silently broke the mouse bridge.
+ * The emulator is the pinned `emulators` dependency (8.4.2), served to the page
+ * straight from node_modules. There is no CDN and no directory scanning.
+ * DOSMCP_JSDOS_DIR overrides it, for developing against a locally built emulators
+ * dist; see resolveJsDosSource() below for the resolution order.
  *
  * API surface used:
  *   - emulators.dosboxDirect(init: InitFs, options?)  →  CommandInterface

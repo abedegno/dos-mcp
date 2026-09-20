@@ -50,11 +50,11 @@ describe("resolveJsDosSource", () => {
   });
 
   it("throws naming the package when it cannot be resolved at all", () => {
-    expect(() => resolveJsDosSource({}, none, pkg(null))).toThrow(/emulators/);
+    expect(() => resolveJsDosSource({}, none, pkg(null))).toThrow(/could not resolve it at all/);
   });
 
   it("throws when the package resolves but carries no emulators.js", () => {
-    expect(() => resolveJsDosSource({}, none, pkg("/pkg"))).toThrow(/emulators/);
+    expect(() => resolveJsDosSource({}, none, pkg("/pkg"))).toThrow(/found no emulators\.js there/);
   });
 });
 
