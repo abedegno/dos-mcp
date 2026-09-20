@@ -40,6 +40,8 @@ import type {
   FsStat,
   LoadBundleOptions,
   LoadBundleResult,
+  SearchMemoryOptions,
+  SearchMemoryResult,
 } from "./index.js";
 import { detectBundleSource } from "../bundle/detect.js";
 import { extractDirectory, extractZip } from "../bundle/extract.js";
@@ -798,5 +800,136 @@ export class JsDosBackend implements Backend {
   async fsSync(): Promise<{ mirrorsFlushed: number }> {
     const n = await this.mirror.flush();
     return { mirrorsFlushed: n };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Guest memory
+  //
+  // js-dos does not expose the guest's RAM: CommandInterface has no memory call,
+  // and the wasm build exports no mem_readb we could reach. What it does have is
+  // the emscripten Module, at ci.transport.module, whose HEAPU8 contains
+  // DOSBox-X's emulated RAM as one contiguous block. So reading guest memory is
+  // reading that array at the right offset.
+  //
+  // The offset of guest physical 0 within the heap is found by its content. The
+  // BIOS data area is a reliable fingerprint: physical 0x400 holds the COM port
+  // base addresses (COM1 03F8, COM2 02F8) and the word at 0x413 is conventional
+  // memory size in KB, always 640. In practice that matches exactly one place in
+  // a 64MB heap.
+  //
+  // Text video memory is NOT a usable anchor even though it is easy to recognise:
+  // DOSBox keeps it in a separate allocation, so it is not at memBase + 0xB8000.
+  // ---------------------------------------------------------------------------
+
+  /** Offset of guest physical 0 within HEAPU8. Cached, but re-validated on use. */
+  private memBase?: number;
+
+  /**
+   * Find guest physical 0 inside the wasm heap.
+   *
+   * The cached value is re-checked against the fingerprint every call rather
+   * than trusted. Emscripten replaces the HEAPU8 view when wasm memory grows,
+   * and a stale base reads plausible-looking rubbish rather than failing, which
+   * is the worst way for this to go wrong.
+   */
+  private async resolveMemBase(): Promise<number> {
+    if (!this.page) throw new Error("not loaded");
+    const res = await this.page.evaluate((cached: number | null) => {
+      const mod = (window as unknown as { __dosmcp?: { ci?: { transport?: { module?: { HEAPU8?: Uint8Array } } } } })
+        .__dosmcp?.ci?.transport?.module;
+      const h = mod?.HEAPU8;
+      if (!h) return { error: "no wasm heap on ci.transport.module" };
+      const fingerprint = (b: number): boolean =>
+        b >= 0 &&
+        b + 0x500 < h.length &&
+        h[b + 0x400] === 0xf8 &&
+        h[b + 0x401] === 0x03 &&
+        h[b + 0x402] === 0xf8 &&
+        h[b + 0x403] === 0x02 &&
+        (h[b + 0x413] | (h[b + 0x414] << 8)) === 640;
+      if (cached !== null && fingerprint(cached)) {
+        return { base: cached, heapBytes: h.length, rescanned: false };
+      }
+      for (let i = 0x400; i + 0x500 < h.length; i++) {
+        if (h[i] !== 0xf8) continue;
+        const b = i - 0x400;
+        if (fingerprint(b)) return { base: b, heapBytes: h.length, rescanned: true };
+      }
+      return { error: "could not locate the BIOS data area in the wasm heap" };
+    }, this.memBase ?? null);
+    if ("error" in res && res.error) throw new Error(`read_memory: ${res.error}`);
+    const base = (res as { base: number }).base;
+    this.memBase = base;
+    return base;
+  }
+
+  /**
+   * Read guest memory by physical address.
+   *
+   * The upper bound enforced here is the wasm heap, not the size of the guest's
+   * RAM, which is not discoverable from this side. Reading far above the guest's
+   * configured memory therefore returns emulator internals rather than failing.
+   * Conventional memory, which is what a real-mode disassembly addresses, is
+   * always well inside the valid range.
+   */
+  async readMemory(address: number, length: number): Promise<Buffer> {
+    if (!this.page) throw new Error("not loaded");
+    const base = await this.resolveMemBase();
+    const res = await this.page.evaluate(
+      (base: number, address: number, length: number) => {
+        const h = (window as unknown as { __dosmcp: { ci: { transport: { module: { HEAPU8: Uint8Array } } } } })
+          .__dosmcp.ci.transport.module.HEAPU8;
+        const from = base + address;
+        if (from < 0 || from + length > h.length) {
+          return { error: `address ${address} length ${length} runs past the end of guest memory` };
+        }
+        let bin = "";
+        const chunk = 8192;
+        for (let i = 0; i < length; i += chunk) {
+          bin += String.fromCharCode(...Array.from(h.subarray(from + i, from + Math.min(i + chunk, length))));
+        }
+        return { b64: btoa(bin) };
+      },
+      base,
+      address,
+      length
+    );
+    if ("error" in res && res.error) throw new Error(`read_memory: ${res.error}`);
+    return Buffer.from((res as { b64: string }).b64, "base64");
+  }
+
+  /** Scan guest memory for a byte pattern, returning physical addresses. */
+  async searchMemory(
+    pattern: Buffer,
+    options: SearchMemoryOptions = {}
+  ): Promise<SearchMemoryResult> {
+    if (!this.page) throw new Error("not loaded");
+    const base = await this.resolveMemBase();
+    const res = await this.page.evaluate(
+      (base: number, patternBytes: number[], maxHits: number, start: number, end: number | null) => {
+        const h = (window as unknown as { __dosmcp: { ci: { transport: { module: { HEAPU8: Uint8Array } } } } })
+          .__dosmcp.ci.transport.module.HEAPU8;
+        const limit = end === null ? h.length - base : end;
+        const from = base + Math.max(0, start);
+        const to = Math.min(h.length, base + limit);
+        const first = patternBytes[0];
+        const hits: number[] = [];
+        for (let i = from; i <= to - patternBytes.length && hits.length < maxHits; i++) {
+          if (h[i] !== first) continue;
+          let ok = true;
+          for (let k = 1; k < patternBytes.length; k++) {
+            if (h[i + k] !== patternBytes[k]) { ok = false; break; }
+          }
+          if (ok) hits.push(i - base);
+        }
+        return { hits, scannedBytes: Math.max(0, to - from) };
+      },
+      base,
+      Array.from(pattern),
+      options.maxHits ?? 8,
+      options.start ?? 0,
+      options.end ?? null
+    );
+    return { hits: res.hits, scannedBytes: res.scannedBytes };
   }
 }

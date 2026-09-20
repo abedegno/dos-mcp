@@ -1,4 +1,13 @@
-import { Backend, LoadBundleOptions, LoadBundleResult, BackendStatus, FsEntry, FsStat } from "./index.js";
+import {
+  Backend,
+  LoadBundleOptions,
+  LoadBundleResult,
+  BackendStatus,
+  FsEntry,
+  FsStat,
+  SearchMemoryOptions,
+  SearchMemoryResult,
+} from "./index.js";
 import { normalizeDosPath } from "../paths.js";
 
 /**
@@ -15,6 +24,40 @@ export class FakeBackend implements Backend {
   public recordedMoves: Array<{ x: number; y: number }> = [];
   public recordedRelativeMoves: Array<{ dx: number; dy: number }> = [];
   public recordedCursorClicks: Array<{ button: string; holdMs: number }> = [];
+
+  /** One megabyte of conventional memory, zero filled. */
+  public readonly memorySize = 1024 * 1024;
+  private memory: Buffer = Buffer.alloc(1024 * 1024);
+
+  /** Test helper: place known bytes at a physical address. */
+  pokeMemory(address: number, bytes: Buffer): void {
+    bytes.copy(this.memory, address);
+  }
+
+  async readMemory(address: number, length: number): Promise<Buffer> {
+    if (address + length > this.memory.length) {
+      throw new Error(
+        `read of ${length} at ${address} runs beyond the end of memory (${this.memory.length})`
+      );
+    }
+    return Buffer.from(this.memory.subarray(address, address + length));
+  }
+
+  async searchMemory(
+    pattern: Buffer,
+    options: SearchMemoryOptions = {}
+  ): Promise<SearchMemoryResult> {
+    const start = Math.max(0, options.start ?? 0);
+    const end = Math.min(this.memory.length, options.end ?? this.memory.length);
+    const maxHits = options.maxHits ?? 8;
+    const hits: number[] = [];
+    for (let i = start; i <= end - pattern.length && hits.length < maxHits; i++) {
+      if (this.memory.compare(pattern, 0, pattern.length, i, i + pattern.length) === 0) {
+        hits.push(i);
+      }
+    }
+    return { hits, scannedBytes: Math.max(0, end - start) };
+  }
 
   async loadBundle(_options: LoadBundleOptions): Promise<LoadBundleResult> {
     this.running = true;

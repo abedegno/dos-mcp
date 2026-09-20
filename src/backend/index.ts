@@ -43,6 +43,35 @@ export interface Backend {
   fsStat(dosPath: string): Promise<FsStat | null>;
   fsDelete(dosPath: string): Promise<void>;
   fsSync(): Promise<{ mirrorsFlushed: number }>;
+  /**
+   * Read the guest's emulated RAM by DOS physical address.
+   *
+   * Real-mode physical addressing: a `seg:off` pair from a disassembly is
+   * `seg * 16 + off`. Throws rather than returning a short buffer when the
+   * range runs past the end of memory, because a silent truncation reads as
+   * valid data downstream.
+   */
+  readMemory(address: number, length: number): Promise<Buffer>;
+  /**
+   * Scan the guest's emulated RAM for a byte pattern, returning physical
+   * addresses. The scan runs next to the memory rather than shipping it to the
+   * caller, which is the only practical way to locate a segment whose base is
+   * not known in advance.
+   */
+  searchMemory(pattern: Buffer, options?: SearchMemoryOptions): Promise<SearchMemoryResult>;
+}
+
+export interface SearchMemoryOptions {
+  /** Stop after this many hits. */
+  maxHits?: number;
+  /** Restrict the scan to [start, end). */
+  start?: number;
+  end?: number;
+}
+
+export interface SearchMemoryResult {
+  hits: number[];
+  scannedBytes: number;
 }
 
 export interface LoadBundleOptions {

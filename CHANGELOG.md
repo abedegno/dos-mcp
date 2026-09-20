@@ -8,10 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Nothing is released from this section yet; it records what has landed on `main` since
-0.1.0. Tool count is now 19, up from the 16 listed below.
+0.1.0. Tool count is now 21, up from the 16 listed below.
 
 ### Added
 
+- `read_memory(address | segment+offset, length)` and `search_memory(pattern_base64, ...)` —
+  read-only access to the guest's emulated DOS memory. js-dos exposes no memory API and the
+  wasm build exports no `mem_readb`, so these reach DOSBox-X's RAM through the emscripten
+  module at `ci.transport.module.HEAPU8`. Guest physical 0 is located by fingerprinting the
+  BIOS data area (COM port table at `0x400`, 640 KB size word at `0x413`), re-validated on
+  every call because emscripten replaces the heap view when wasm memory grows.
 - The js-dos build is now resolved explicitly and reported on startup. A locally built
   emulators dist is found automatically in `jsdos-dist/`, `../emulators-dist/` or
   `../emulators/dist/`, so a plain launch no longer silently falls back to the CDN.
