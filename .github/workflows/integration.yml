@@ -3,10 +3,41 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The canary job below needs its own triggers. A weekly run is enough to catch the
+  # 26.04 migration well before it reaches ubuntu-latest.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 jobs:
   integration:
-    runs-on: ubuntu-latest
+    # Pinned, so a pull request's result never depends on which image it happened to
+    # land on while ubuntu-latest migrates to 26.04 between 2026-10-19 and 2026-11-19.
+    # An intermittent failure that tracks the runner image rather than the code is the
+    # most expensive kind to diagnose.
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:integration
+
+  # Early warning. This suite boots real Chromium through puppeteer, which is the usual
+  # casualty of a base image change: headless Chrome needs a pile of system shared
+  # libraries and an image bump is exactly when one stops being preinstalled.
+  #
+  # Runs weekly rather than on every pull request, because booting Chromium twice per PR
+  # costs more than it tells us. It is allowed to fail loudly: a red scheduled run IS the
+  # alert. If the ubuntu-26.04 label does not exist yet the job fails to find a runner,
+  # which is noisy but still tells us something true.
+  future-image:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6

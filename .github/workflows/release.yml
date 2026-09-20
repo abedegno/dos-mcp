@@ -6,9 +6,14 @@ on:
   push:
     tags: ["v*"]
 
+# Pinned to ubuntu-24.04 rather than ubuntu-latest, which begins migrating to Ubuntu
+# 26.04 on 2026-10-19 over several weeks. A release is rare and has to work on the day
+# you want it, so there is no upside to it riding a moving label. The future-image job
+# in integration.yml is what tells us when 26.04 is safe to move to.
+
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -22,7 +27,7 @@ jobs:
 
   publish:
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       # Required twice over: it is how the OIDC token for trusted publishing is minted,
@@ -60,7 +65,7 @@ jobs:
   # needs id-token, this needs contents: write, and neither needs the other's.
   github-release:
     needs: publish
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
