@@ -10,17 +10,40 @@ Built for reverse-engineering and retro-porting work, where the AI needs to inte
 
 ## Status
 
-**Phase 1 (v0.1.0):** 21 tools — session control, input, observation, filesystem, guest memory. Usable today.
+**21 tools**, covering session control, input, observation, the virtual DOS filesystem, and read-only access to guest memory. Usable today.
 
-**Phase 2 (planned):** memory inspection (`read_memory(seg, off)`) and save-state snapshot/restore. These are the features that unlock byte-level debugging against a running DOS emulator — the motivating use case for the whole project.
-
-**Phase 3 (tentative):** breakpoints and stepping. Only if Phase 2 isn't enough.
+`read_memory` and `search_memory` landed in 0.2.0, which was the feature that motivated the project: byte-level inspection of a running DOS program. Save-state snapshot and restore is the main thing still missing. Breakpoints and stepping remain speculative.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for release history.
 
 ## Install
 
-Needs Node 22.13 or newer. Not yet on npm, so clone and build:
+Needs Node 22.13 or newer. Add it to your MCP client's config and let npx fetch it:
+
+```json
+{
+  "mcpServers": {
+    "dos-mcp": {
+      "command": "npx",
+      "args": ["-y", "dos-mcp"]
+    }
+  }
+}
+```
+
+That is the whole setup. The DOS emulator arrives as an ordinary dependency, pinned to `emulators@8.4.2`, so there is nothing to build and no environment variable to set.
+
+**One real cost, stated plainly.** Puppeteer downloads its own browser on install: a full Chrome plus a headless shell, together about 560 MB on disk, and each Puppeteer version caches another copy rather than replacing the last. This is zero configuration, not zero download.
+
+Behind an HTTP proxy that download needs `proxy-agent`, which is no longer installed for you:
+
+```bash
+npm install proxy-agent
+```
+
+Puppeteer 25 made it an optional peer dependency, so `HTTP_PROXY` and `HTTPS_PROXY` are ignored until it is present, and the download fails without saying why.
+
+### From a clone
 
 ```bash
 git clone https://github.com/abedegno/dos-mcp.git
@@ -29,39 +52,16 @@ npm install
 npm run build
 ```
 
-`npm install` downloads a Chrome build for Puppeteer. Behind an HTTP proxy that
-download needs `proxy-agent`, which is no longer installed for you:
-
-```bash
-npm install proxy-agent
-```
-
-Puppeteer 25 made it an optional peer dependency, so `HTTP_PROXY` and `HTTPS_PROXY`
-are ignored until it is present and the download fails without saying why.
-
 ## Use
 
-Add `dos-mcp` to your MCP client's config (example for Claude Code, `~/.claude/mcp.json`):
+Install above shows the basic config. For an attended session where you can watch the AI drive:
 
 ```json
 {
   "mcpServers": {
     "dos-mcp": {
-      "command": "node",
-      "args": ["/absolute/path/to/dos-mcp/dist/server.js"]
-    }
-  }
-}
-```
-
-For an attended session where you can watch the AI drive:
-
-```json
-{
-  "mcpServers": {
-    "dos-mcp": {
-      "command": "node",
-      "args": ["/absolute/path/to/dos-mcp/dist/server.js", "--attended"]
+      "command": "npx",
+      "args": ["-y", "dos-mcp", "--attended"]
     }
   }
 }
@@ -224,6 +224,8 @@ emulator still answers is hung on its own account, not dead underneath.
  └──────────────────────────┘
 ```
 
+The emulator is `emulators@8.4.2`, a pinned npm dependency, served to the host page from `node_modules`. There is no CDN fallback and no directory scanning: one pinned build, or a clear error. Setting `DOSMCP_JSDOS_DIR` to a built emulators dist overrides it, which is how an unreleased emulator patch gets tested, and a value pointing somewhere unusable is fatal rather than a silent downgrade.
+
 A `Backend` interface abstracts the emulator so unit tests can use an in-memory `FakeBackend` without spinning up Chromium.
 
 ## Develop
@@ -241,7 +243,7 @@ Full contribution guidelines: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Licensing
 
-`dos-mcp` itself is MIT-licensed (see [`LICENSE`](LICENSE)). The js-dos runtime that this project depends on at runtime is **GPL-2.0**. You can use `dos-mcp` freely, but if you distribute a derivative work (or a product that bundles js-dos / `emulators.js`), the GPL-2.0 copyleft obligations apply to that distribution. `dos-mcp` loads `emulators.js` from its CDN at runtime; we do not redistribute it.
+`dos-mcp` itself is MIT-licensed (see [`LICENSE`](LICENSE)). The js-dos runtime it depends on, published as the `emulators` package, is **GPL-2.0**. You can use `dos-mcp` freely, but if you distribute a derivative work, or a product that bundles js-dos or `emulators.js`, the GPL-2.0 copyleft obligations apply to that distribution. `dos-mcp` declares `emulators` as a dependency and npm installs it from the npm registry; the published `dos-mcp` package does not itself contain `emulators.js`.
 
 Further reading:
 - [js-dos project](https://github.com/caiiiycuk/js-dos) and the `emulators` package — Alexander Guryanov (caiiiycuk)

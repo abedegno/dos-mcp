@@ -1,0 +1,51 @@
+name: Release
+
+# Publishing is driven by a tag rather than a branch push so that cutting a release
+# is a deliberate act with a name, and so a re-run publishes exactly what was tagged.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for npm provenance, which signs the package with a verifiable link
+      # back to this workflow run and commit.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+      - run: npm ci
+      # prepack runs the build, so the published tarball cannot contain a stale dist.
+      - name: Refuse to publish if the tag does not match package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag $GITHUB_REF_NAME implies $tag but package.json says $pkg" >&2
+            exit 1
+          fi
+          echo "tag and package.json agree on $pkg"
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

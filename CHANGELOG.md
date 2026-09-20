@@ -7,8 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing is released from this section yet; it records what has landed on `main` since
-0.1.0. Tool count is now 21, up from the 16 listed below.
+## [0.2.0] - 2026-09-20
 
 ### Added
 
@@ -18,12 +17,9 @@ Nothing is released from this section yet; it records what has landed on `main` 
   module at `ci.transport.module.HEAPU8`. Guest physical 0 is located by fingerprinting the
   BIOS data area (COM port table at `0x400`, 640 KB size word at `0x413`), re-validated on
   every call because emscripten replaces the heap view when wasm memory grows.
-- The js-dos build is now resolved explicitly and reported on startup. A locally built
-  emulators dist is found automatically in `jsdos-dist/`, `../emulators-dist/` or
-  `../emulators/dist/`, so a plain launch no longer silently falls back to the CDN.
-  `DOSMCP_JSDOS_DIR` still wins when set, and now fails loudly if it points somewhere
-  without an `emulators.js` rather than quietly downgrading to the CDN. Falling back
-  logs which directories were searched.
+- The chosen js-dos build is reported on startup, so which emulator is in use is never
+  a guess. `DOSMCP_JSDOS_DIR` overrides the bundled one and fails loudly if it points
+  somewhere without an `emulators.js`, rather than quietly downgrading.
 - `dos-pull.mjs`, `dos-push.mjs` and `dos-shot.mjs`, which attach to a running session and
   read or write the emulated filesystem without restarting it. A restart rebuilds that
   filesystem from disk and loses anything the guest wrote, which made a save produced
@@ -36,15 +32,19 @@ Nothing is released from this section yet; it records what has landed on `main` 
 - `fs_stat(dos_path)` — stat one entry without listing its parent.
 - `host_path` on `screenshot` — write the image to disk and return the path, for frames
   too large to pass through the tool channel.
+- The DOS emulator is now an ordinary dependency, pinned to `emulators@8.4.2`, the first
+  release containing the INT 33h mickey fix from caiiiycuk/emulators#24. There is nothing
+  to build and no environment variable to set.
 
 ### Changed
 
+- **Breaking for anyone relying on the CDN fallback:** it is gone, along with the
+  auto-detection of a locally built dist in sibling directories. Both could serve a
+  different emulator than the pinned one with no error. `DOSMCP_JSDOS_DIR` still overrides.
 - **Requires Node 22.13 or newer**, up from 20. Puppeteer 25 requires 22.12, and eslint
   requires 22.13 for the 22 line, so 22.13 is the floor a working tree actually needs.
 - `send_keys` no longer silently ignores a character it cannot deliver. It refuses the
   whole call instead, naming the offending characters, so nothing is half-typed.
-- The js-dos engine is pinned via `DOSMCP_JSDOS_DIR` rather than loaded from a CDN that
-  only ever serves a moving `/latest/`.
 - `screenshot` is documented as not being an atomic snapshot: the guest keeps running and
   a refused capture is retried, so the frame can be later than the request.
 
@@ -115,4 +115,5 @@ in and out of a DOS program running under js-dos.
 - No OCR / screen-text extraction.
 - No audio capture.
 
+[0.2.0]: https://github.com/abedegno/dos-mcp/releases/tag/v0.2.0
 [0.1.0]: https://github.com/abedegno/dos-mcp/releases/tag/v0.1.0
