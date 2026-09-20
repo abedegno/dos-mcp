@@ -1,67 +1,76 @@
 import { describe, it, expect } from "vitest";
+import * as path from "node:path";
 import {
   resolveJsDosSource,
   describeJsDosSource,
-  jsDosSearchPaths,
+  emulatorsDistDir,
 } from "../../../src/backend/jsdos";
 
-// Which js-dos build gets loaded was previously decided by a single unchecked env var,
-// and an unset one fell through to the CDN without a word. The CDN serves a moving
-// /latest/, so that silently swaps the emulator underneath the input bridge and drops
-// any local emulator patches. The failure looks like a game bug, not a config mistake,
-// which is what made it expensive.
+// Which js-dos build gets loaded used to fall through to a CDN that served a moving
+// /latest/ carrying none of our emulator patches. The failure looked like a game bug
+// rather than a config mistake, which is what made it expensive. The emulator is now a
+// pinned dependency, so there is exactly one default and no silent alternative.
 
-const root = "/repo/dos-mcp";
 const none = () => false;
-const only = (...good: string[]) => (dir: string) => good.includes(dir);
+const only =
+  (...good: string[]) =>
+  (dir: string) =>
+    good.includes(dir);
+const pkg = (dir: string | null) => () => dir;
 
 describe("resolveJsDosSource", () => {
   it("uses DOSMCP_JSDOS_DIR when it points at a real dist", () => {
-    const src = resolveJsDosSource({ DOSMCP_JSDOS_DIR: "/built" }, root, only("/built"));
+    const src = resolveJsDosSource({ DOSMCP_JSDOS_DIR: "/built" }, only("/built"), pkg(null));
     expect(src).toEqual({ dir: "/built", origin: "env" });
   });
 
-  it("throws rather than quietly using the CDN when DOSMCP_JSDOS_DIR is wrong", () => {
-    // The silent downgrade this replaces: a typo used to cost a whole debugging session.
-    expect(() => resolveJsDosSource({ DOSMCP_JSDOS_DIR: "/typo" }, root, none)).toThrow(
-      /no emulators\.js there/
+  it("throws rather than quietly using the package when DOSMCP_JSDOS_DIR is wrong", () => {
+    expect(() => resolveJsDosSource({ DOSMCP_JSDOS_DIR: "/nope" }, none, pkg("/pkg"))).toThrow(
+      /DOSMCP_JSDOS_DIR/
     );
   });
 
   it("ignores an empty or whitespace DOSMCP_JSDOS_DIR instead of throwing", () => {
-    expect(resolveJsDosSource({ DOSMCP_JSDOS_DIR: "  " }, root, none).origin).toBe("cdn");
+    const src = resolveJsDosSource({ DOSMCP_JSDOS_DIR: "  " }, only("/pkg"), pkg("/pkg"));
+    expect(src).toEqual({ dir: "/pkg", origin: "package" });
   });
 
-  it("finds a build in a conventional location when the variable is unset", () => {
-    const sibling = jsDosSearchPaths(root)[1];
-    const src = resolveJsDosSource({}, root, only(sibling));
-    expect(src).toMatchObject({ dir: sibling, origin: "auto" });
+  it("uses the emulators package when the variable is unset", () => {
+    const src = resolveJsDosSource({}, only("/pkg"), pkg("/pkg"));
+    expect(src).toEqual({ dir: "/pkg", origin: "package" });
   });
 
-  it("prefers the explicit variable over an auto-detected build", () => {
-    const sibling = jsDosSearchPaths(root)[1];
-    const src = resolveJsDosSource({ DOSMCP_JSDOS_DIR: "/built" }, root, only("/built", sibling));
-    expect(src.dir).toBe("/built");
-    expect(src.origin).toBe("env");
+  it("prefers the explicit variable over the package", () => {
+    const src = resolveJsDosSource(
+      { DOSMCP_JSDOS_DIR: "/built" },
+      only("/built", "/pkg"),
+      pkg("/pkg")
+    );
+    expect(src).toEqual({ dir: "/built", origin: "env" });
   });
 
-  it("prefers an in-repo build over a sibling one", () => {
-    const [inRepo, sibling] = jsDosSearchPaths(root);
-    const src = resolveJsDosSource({}, root, only(inRepo, sibling));
-    expect(src.dir).toBe(inRepo);
+  it("throws naming the package when it cannot be resolved at all", () => {
+    expect(() => resolveJsDosSource({}, none, pkg(null))).toThrow(/emulators/);
   });
 
-  it("falls back to the CDN only when nothing is found, and says where it looked", () => {
-    const src = resolveJsDosSource({}, root, none);
-    expect(src).toEqual({ dir: null, origin: "cdn", searched: jsDosSearchPaths(root) });
+  it("throws when the package resolves but carries no emulators.js", () => {
+    expect(() => resolveJsDosSource({}, none, pkg("/pkg"))).toThrow(/emulators/);
+  });
+});
+
+describe("emulatorsDistDir", () => {
+  it("derives dist from the package.json path so pnpm and yarn layouts work", () => {
+    expect(emulatorsDistDir(() => "/n/emulators/package.json")).toBe(
+      path.join("/n", "emulators", "dist")
+    );
   });
 
-  it("searches inside the repo and beside it", () => {
-    expect(jsDosSearchPaths(root)).toEqual([
-      "/repo/dos-mcp/jsdos-dist",
-      "/repo/emulators-dist",
-      "/repo/emulators/dist",
-    ]);
+  it("returns null when the package is not installed", () => {
+    expect(
+      emulatorsDistDir(() => {
+        throw new Error("Cannot find module");
+      })
+    ).toBeNull();
   });
 });
 
@@ -69,15 +78,7 @@ describe("describeJsDosSource", () => {
   it("names the directory and why it was chosen", () => {
     expect(describeJsDosSource({ dir: "/built", origin: "env" })).toContain("/built");
     expect(describeJsDosSource({ dir: "/built", origin: "env" })).toContain("DOSMCP_JSDOS_DIR");
-    expect(
-      describeJsDosSource({ dir: "/found", origin: "auto", searched: [] })
-    ).toContain("automatically");
-  });
-
-  it("warns on the CDN path and lists where it looked", () => {
-    const msg = describeJsDosSource({ dir: null, origin: "cdn", searched: ["/a", "/b"] });
-    expect(msg).toMatch(/moving \/latest\//);
-    expect(msg).toContain("DOSMCP_JSDOS_DIR");
-    expect(msg).toContain("/a, /b");
+    expect(describeJsDosSource({ dir: "/pkg", origin: "package" })).toContain("/pkg");
+    expect(describeJsDosSource({ dir: "/pkg", origin: "package" })).toContain("emulators");
   });
 });

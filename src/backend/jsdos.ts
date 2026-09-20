@@ -29,6 +29,7 @@
 import * as path from "node:path";
 import { statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 // The namespace as well as the default export: TargetCloseError is a named export, and the
 // default export is a PuppeteerNode instance that does not carry it.
 import puppeteer, * as puppeteerModule from "puppeteer";
@@ -252,25 +253,32 @@ export interface JsDosBackendOptions {
 /**
  * Where js-dos is loaded from.
  *
- * The CDN only ever serves a moving /latest/, so a build that works today can break
- * tomorrow with nothing edited: that is exactly how 8.4.x silently changed the mouse
- * coordinate convention underneath this bridge. A local build is also the only way to
- * carry our own emulator patches. Falling back to the CDN without saying so has cost
- * real debugging time, so the choice is resolved explicitly and always reported.
+ * js-dos ships as the pinned `emulators` dependency, which carries the INT 33h mickey
+ * fix this bridge needs. DOSMCP_JSDOS_DIR overrides it for testing an unreleased build.
+ * There is no other fallback: a CDN serves a moving /latest/, and auto-detecting a
+ * sibling directory lets a developer's local fork silently win over the pinned
+ * dependency. Both produce wrong behaviour with no error, which is the most expensive
+ * kind, so the choice is resolved explicitly and always reported.
  */
 export type JsDosSource =
   | { dir: string; origin: "env" }
-  | { dir: string; origin: "auto"; searched: string[] }
-  | { dir: null; origin: "cdn"; searched: string[] };
+  | { dir: string; origin: "package" };
 
-/** Conventional places to find a locally built emulators dist, relative to the repo. */
-export function jsDosSearchPaths(repoRoot: string): string[] {
-  const parent = path.dirname(repoRoot);
-  return [
-    path.join(repoRoot, "jsdos-dist"),
-    path.join(parent, "emulators-dist"),
-    path.join(parent, "emulators", "dist"),
-  ];
+/**
+ * Locate the emulators package's own dist directory.
+ *
+ * Resolution goes through Node rather than guessing at a node_modules path, so
+ * pnpm's store layout and yarn's hoisting both work. Resolving package.json rather
+ * than the package entry point avoids depending on its "exports" map.
+ */
+export function emulatorsDistDir(
+  resolver: (id: string) => string = createRequire(import.meta.url).resolve
+): string | null {
+  try {
+    return path.join(path.dirname(resolver("emulators/package.json")), "dist");
+  } catch {
+    return null;
+  }
 }
 
 /** A dist is usable only if it actually carries the loader the page asks for. */
@@ -284,40 +292,46 @@ export function isUsableJsDosDir(dir: string): boolean {
 
 /**
  * DOSMCP_JSDOS_DIR wins when set, and a bad value is fatal rather than a silent
- * downgrade to the CDN: someone who set it meant to use it. Otherwise look in the
- * conventional locations, and only then fall back.
+ * downgrade: someone who set it meant to use it. Otherwise the pinned emulators
+ * package is used.
+ *
+ * There is deliberately no fallback. The CDN serves a moving /latest/ carrying none
+ * of our emulator patches, and a build found by scanning sibling directories lets a
+ * developer's local fork silently win over the pinned dependency. Both produce wrong
+ * behaviour with no error, which is the most expensive kind.
  */
 export function resolveJsDosSource(
   env: NodeJS.ProcessEnv = process.env,
-  repoRoot: string = path.resolve(__dirname, "..", ".."),
-  usable: (dir: string) => boolean = isUsableJsDosDir
+  usable: (dir: string) => boolean = isUsableJsDosDir,
+  packageDir: () => string | null = emulatorsDistDir
 ): JsDosSource {
   const explicit = env.DOSMCP_JSDOS_DIR?.trim();
   if (explicit) {
     if (!usable(explicit)) {
       throw new Error(
         `DOSMCP_JSDOS_DIR is set to ${explicit} but there is no emulators.js there. ` +
-          `Point it at a built emulators dist, or unset it to use the CDN.`
+          `Point it at a built emulators dist, or unset it to use the bundled emulators package.`
       );
     }
     return { dir: explicit, origin: "env" };
   }
 
-  const searched = jsDosSearchPaths(repoRoot);
-  const found = searched.find(usable);
-  return found
-    ? { dir: found, origin: "auto", searched }
-    : { dir: null, origin: "cdn", searched };
+  const dir = packageDir();
+  if (dir && usable(dir)) return { dir, origin: "package" };
+
+  throw new Error(
+    "dos-mcp could not load the emulators package, which it depends on at version 8.4.2. " +
+      (dir
+        ? `Resolved it to ${dir} but found no emulators.js there. `
+        : "Node could not resolve it at all. ") +
+      "Reinstall dependencies, or set DOSMCP_JSDOS_DIR to a built emulators dist."
+  );
 }
 
 export function describeJsDosSource(src: JsDosSource): string {
-  if (src.origin === "env") return `dos-mcp: js-dos from ${src.dir} (DOSMCP_JSDOS_DIR)`;
-  if (src.origin === "auto") return `dos-mcp: js-dos from ${src.dir} (found automatically)`;
-  return (
-    "dos-mcp: js-dos from the CDN, which serves a moving /latest/ and carries none of " +
-    "our emulator patches. Set DOSMCP_JSDOS_DIR to a built dist to pin it. Looked in: " +
-    src.searched.join(", ")
-  );
+  return src.origin === "env"
+    ? `dos-mcp: js-dos from ${src.dir} (DOSMCP_JSDOS_DIR)`
+    : `dos-mcp: js-dos from ${src.dir} (emulators package)`;
 }
 
 export class JsDosBackend implements Backend {
@@ -396,19 +410,17 @@ export class JsDosBackend implements Backend {
     this.page = await this.browser.newPage();
     await this.page.setViewport({ width: 640, height: 400 });
 
-    // Serve the page over http so it can be cross-origin isolated. When we have a
-    // locally built emulators dist, serve that too and tell the page to load js-dos
-    // from there instead of the CDN, which only ever offers a moving /latest/.
+    // Serve the page over http so it can be cross-origin isolated, and serve the
+    // emulators dist alongside it so the page loads a pinned build rather than
+    // whatever a CDN is currently calling latest.
     const jsdos = resolveJsDosSource();
     console.error(describeJsDosSource(jsdos));
 
-    const localDist = jsdos.dir;
-    const roots: Record<string, string> = { "/": __dirname };
-    if (localDist) roots["/jsdos/"] = localDist;
-    this.staticServer = await startStaticServer(roots, Boolean(localDist));
+    const roots: Record<string, string> = { "/": __dirname, "/jsdos/": jsdos.dir };
+    this.staticServer = await startStaticServer(roots, true);
 
     const pageUrl = new URL("/jsdos-page.html", this.staticServer.origin);
-    if (localDist) pageUrl.searchParams.set("jsdos", "/jsdos/");
+    pageUrl.searchParams.set("jsdos", "/jsdos/");
     await this.page.goto(pageUrl.toString());
 
     // Wait until emulators.js has loaded and the load-event handler has set
