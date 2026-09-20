@@ -1,6 +1,6 @@
 {
   "name": "dos-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server exposing a DOS emulator (js-dos) to AI agents — drive, observe, and inspect DOS programs.",
   "type": "module",
   "main": "dist/server.js",
