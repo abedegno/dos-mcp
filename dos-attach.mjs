@@ -35,9 +35,25 @@ export async function attach() {
   return { browser, page, done: () => browser.disconnect() };
 }
 
+// js-dos refuses a second fsReadFile for the same path STRING in one session, with
+// "fsGetFile should not be called twice for same file". Its cache is keyed on the exact
+// string, so a distinct spelling of the same path reads again. Without this, a second pull
+// of a slot silently returns nothing and the results look inconsistent for no visible
+// reason, which is exactly how it was found.
+
 /** Read a file out of the emulated DOS filesystem. Returns null when absent. */
 export async function readDosFile(page, dosPath) {
-  const b64 = await page.evaluate(async (p) => {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const spelled = "./".repeat(attempt) + dosPath;
+    const r = await readOnce(page, spelled);
+    if (r.bytes !== null) return r.bytes;
+    if (!/should not be called twice/i.test(r.err ?? "")) return null;
+  }
+  throw new Error(`could not re-read ${dosPath}: js-dos rejected every spelling`);
+}
+
+async function readOnce(page, dosPath) {
+  const out = await page.evaluate(async (p) => {
     try {
       const bytes = await window.__dosmcp.ci.fsReadFile(p);
       let bin = "";
@@ -45,12 +61,12 @@ export async function readDosFile(page, dosPath) {
       for (let i = 0; i < bytes.length; i += chunk) {
         bin += String.fromCharCode(...Array.from(bytes.subarray(i, i + chunk)));
       }
-      return btoa(bin);
-    } catch {
-      return null;
+      return { b64: btoa(bin), err: null };
+    } catch (e) {
+      return { b64: null, err: String(e) };
     }
   }, dosPath);
-  return b64 === null ? null : Buffer.from(b64, "base64");
+  return { bytes: out.b64 === null ? null : Buffer.from(out.b64, "base64"), err: out.err };
 }
 
 /** Write a file into the emulated DOS filesystem. */
