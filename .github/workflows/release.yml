@@ -25,14 +25,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Required for npm provenance, which signs the package with a verifiable link
-      # back to this workflow run and commit.
+      # Required twice over: it is how the OIDC token for trusted publishing is minted,
+      # and it is what lets npm attach provenance linking the package to this run.
       id-token: write
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          # Node 24, not 22, only in this job. Trusted publishing needs npm 11.5.1 or
+          # newer and Node 22 still bundles npm 10.9.x. The verify job above stays on 22
+          # so the tests keep running near the version floor package.json declares.
+          node-version: "24"
           cache: npm
           registry-url: "https://registry.npmjs.org"
       - run: npm ci
@@ -46,6 +49,8 @@ jobs:
             exit 1
           fi
           echo "tag and package.json agree on $pkg"
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # No NODE_AUTH_TOKEN. Authentication is OIDC via the trusted publisher configured
+      # on the package, which is why id-token: write above is load bearing rather than
+      # merely enabling provenance. Provenance is generated automatically under trusted
+      # publishing, so the explicit --provenance flag is gone too.
+      - run: npm publish --access public
