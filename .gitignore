@@ -7,3 +7,5 @@ coverage/
 
 # Planning / workflow artifacts live in a sibling directory, not in the repo.
 docs/superpowers/
+
+dos-saves/

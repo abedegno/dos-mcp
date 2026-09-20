@@ -17,6 +17,8 @@
     "build": "tsc && npm run copy-assets",
     "copy-assets": "node -e \"require('node:fs').cpSync('src/backend/jsdos-page.html', 'dist/backend/jsdos-page.html')\"",
     "dev": "tsc --watch",
+    "prepack": "npm run build",
+    "pretest": "npm run build",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
