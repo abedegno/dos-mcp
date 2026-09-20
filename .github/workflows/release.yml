@@ -54,3 +54,33 @@ jobs:
       # merely enabling provenance. Provenance is generated automatically under trusted
       # publishing, so the explicit --provenance flag is gone too.
       - run: npm publish --access public
+
+  # Separate job, gated on a successful publish, so a GitHub release can never claim a
+  # version that npm does not have. It also keeps permissions minimal per job: publish
+  # needs id-token, this needs contents: write, and neither needs the other's.
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Cut the GitHub release from the changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          notes="$(mktemp)"
+          # Everything between this version's heading and the next one.
+          awk -v v="## [$version]" '
+            index($0, v) == 1 { found = 1; next }
+            /^## \[/ { found = 0 }
+            found { print }
+          ' CHANGELOG.md > "$notes"
+          if [ ! -s "$notes" ]; then
+            echo "CHANGELOG.md has no section for [$version], refusing to cut an empty release" >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file "$notes"
