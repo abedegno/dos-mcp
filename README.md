@@ -54,27 +54,14 @@ npm run build
 
 ## Use
 
-Add `dos-mcp` to your MCP client's config (example for Claude Code, `~/.claude/mcp.json`):
+Install above shows the basic config. For an attended session where you can watch the AI drive:
 
 ```json
 {
   "mcpServers": {
     "dos-mcp": {
-      "command": "node",
-      "args": ["/absolute/path/to/dos-mcp/dist/server.js"]
-    }
-  }
-}
-```
-
-For an attended session where you can watch the AI drive:
-
-```json
-{
-  "mcpServers": {
-    "dos-mcp": {
-      "command": "node",
-      "args": ["/absolute/path/to/dos-mcp/dist/server.js", "--attended"]
+      "command": "npx",
+      "args": ["-y", "dos-mcp", "--attended"]
     }
   }
 }
@@ -256,7 +243,7 @@ Full contribution guidelines: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Licensing
 
-`dos-mcp` itself is MIT-licensed (see [`LICENSE`](LICENSE)). The js-dos runtime that this project depends on at runtime is **GPL-2.0**. You can use `dos-mcp` freely, but if you distribute a derivative work (or a product that bundles js-dos / `emulators.js`), the GPL-2.0 copyleft obligations apply to that distribution. `dos-mcp` loads `emulators.js` from its CDN at runtime; we do not redistribute it.
+`dos-mcp` itself is MIT-licensed (see [`LICENSE`](LICENSE)). The js-dos runtime it depends on, published as the `emulators` package, is **GPL-2.0**. You can use `dos-mcp` freely, but if you distribute a derivative work, or a product that bundles js-dos or `emulators.js`, the GPL-2.0 copyleft obligations apply to that distribution. `dos-mcp` declares `emulators` as a dependency and npm installs it from the npm registry; the published `dos-mcp` package does not itself contain `emulators.js`.
 
 Further reading:
 - [js-dos project](https://github.com/caiiiycuk/js-dos) and the `emulators` package — Alexander Guryanov (caiiiycuk)
