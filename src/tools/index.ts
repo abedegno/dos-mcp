@@ -7,6 +7,7 @@ import {
   moveMouseTool,
   moveMouseRelativeTool,
   clickAtCursorTool,
+  mouseButtonTool,
 } from "./input.js";
 import { screenshotTool, getStatusTool } from "./observe.js";
 import { readMemoryTool, searchMemoryTool } from "./memory.js";
@@ -38,6 +39,7 @@ export const tools: ToolDef[] = [
   moveMouseTool,
   moveMouseRelativeTool,
   clickAtCursorTool,
+  mouseButtonTool,
   screenshotTool,
   getStatusTool,
   fsReadTool,

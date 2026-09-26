@@ -26,7 +26,8 @@
       emulators-v8 expects GLFW-style codes.
     - Mouse bridge: canvas mousedown/mouseup/mousemove → ci.sendMouseMotion
       and ci.sendMouseButton with 0..1 normalized coords derived from the
-      canvas's bounding rect.
+      canvas's bounding rect. With ?pointerlock=1, a click captures the mouse
+      and raw relative motion is sent instead (ci.sendMouseRelativeMotion).
     Frame size is sourced from ci.frameWidth / ci.frameHeight (data fields,
     not methods) so the drawing buffer stays pixel-perfect while CSS scales
     the canvas up to the full viewport.
@@ -306,6 +307,52 @@
       });
       // Suppress the context menu so right-click reaches DOSBox.
       canvas.addEventListener("contextmenu", (ev) => ev.preventDefault());
+
+      // --- pointer lock, for a person playing in a visible window ------------
+      // Many DOS games read relative mouse motion and keep their own cursor, so
+      // the absolute bridge above, which the emulator turns into a delta from
+      // wherever it last was, makes the game cursor lag behind the real one.
+      // With ?pointerlock=1, clicking the game captures the mouse: raw movement
+      // is sent as relative motion, scaled from screen pixels to the game's own,
+      // and Esc releases it. Automation is unaffected, since nothing is captured
+      // until a person clicks, and the host only asks for this when attended.
+      const POINTER_LOCK = new URLSearchParams(location.search).get("pointerlock") === "1";
+      window.__dosmcp.pointerLock = POINTER_LOCK;
+      if (POINTER_LOCK) {
+        const locked = () => document.pointerLockElement === canvas;
+        canvas.addEventListener("click", () => {
+          if (!locked() && canvas.requestPointerLock) canvas.requestPointerLock();
+        });
+        // Capture phase on the document, so these run before the canvas
+        // listeners and can stop the absolute bridge while captured.
+        document.addEventListener("mousemove", (ev) => {
+          if (!locked()) return;
+          ev.stopPropagation();
+          const r = canvas.getBoundingClientRect();
+          const kx = canvas.width / r.width;
+          const ky = canvas.height / r.height;
+          ci.sendMouseRelativeMotion(ev.movementX * kx, ev.movementY * ky);
+        }, true);
+        // A quick click can put the press and release in the same emulator tick,
+        // and a game that polls the mouse then misses it. Hold each press 150ms.
+        const MIN_HOLD_MS = 150;
+        const downAt = {};
+        for (const type of ["mousedown", "mouseup"]) {
+          document.addEventListener(type, (ev) => {
+            if (!locked()) return;
+            ev.stopPropagation();
+            ev.preventDefault();
+            const b = ev.button === 2 ? 1 : 0;
+            if (type === "mousedown") {
+              downAt[b] = performance.now();
+              ci.sendMouseButton(b, true);
+            } else {
+              const wait = Math.max(0, MIN_HOLD_MS - (performance.now() - (downAt[b] || 0)));
+              setTimeout(() => ci.sendMouseButton(b, false), wait);
+            }
+          }, true);
+        }
+      }
     }
 
     window.addEventListener("load", function () {

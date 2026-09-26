@@ -24,6 +24,7 @@ export class FakeBackend implements Backend {
   public recordedMoves: Array<{ x: number; y: number }> = [];
   public recordedRelativeMoves: Array<{ dx: number; dy: number }> = [];
   public recordedCursorClicks: Array<{ button: string; holdMs: number }> = [];
+  public recordedButtonStates: Array<{ button: string; pressed: boolean }> = [];
 
   /** One megabyte of conventional memory, zero filled. */
   public readonly memorySize = 1024 * 1024;
@@ -98,6 +99,10 @@ export class FakeBackend implements Backend {
 
   async clickAtCursor(button: "left" | "right" = "left", holdMs = 120): Promise<void> {
     this.recordedCursorClicks.push({ button, holdMs });
+  }
+
+  async setMouseButton(button: "left" | "right", pressed: boolean): Promise<void> {
+    this.recordedButtonStates.push({ button, pressed });
   }
 
   async screenshot(format: "png" | "jpeg" = "png"): Promise<{ bytes: Buffer; mime: string }> {

@@ -138,3 +138,29 @@ export const clickAtCursorTool: ToolDef = {
     return { ok: true };
   },
 };
+
+export const mouseButtonTool: ToolDef = {
+  name: "mouse_button",
+  description:
+    "Press or release a mouse button without moving, and leave it in that state until a later call changes it. Use it with move_mouse_relative for a drag: press, move, release. Some games act only on a drag; Ultima Underworld II picks an inventory item up with a right-button drag. Leave time between the press, the moves and the release (wait), because the guest polls the mouse. A button still down is released when the session shuts down.",
+  inputSchema: {
+    type: "object",
+    required: ["pressed"],
+    properties: {
+      button: { type: "string", enum: ["left", "right"] },
+      pressed: { type: "boolean" },
+    },
+  },
+  async handler(backend: Backend, args: unknown) {
+    const a = args as { button?: unknown; pressed?: unknown };
+    if (a.button !== undefined && a.button !== "left" && a.button !== "right") {
+      throw new Error("mouse_button 'button' must be 'left' or 'right'");
+    }
+    if (typeof a.pressed !== "boolean") {
+      throw new Error("mouse_button requires boolean 'pressed'");
+    }
+    const button = a.button === "right" ? "right" : "left";
+    await backend.setMouseButton(button, a.pressed);
+    return { ok: true };
+  },
+};

@@ -35,6 +35,13 @@ export interface Backend {
    * deltas.
    */
   clickAtCursor(button?: "left" | "right", holdMs?: number): Promise<void>;
+  /**
+   * Press or release a button without moving, and leave it in that state. With
+   * moveMouseRelative in between, this makes a drag: some games act only on a drag,
+   * such as Ultima Underworld II, which picks an inventory item up with a right-button
+   * drag. A button left down is released at shutdown.
+   */
+  setMouseButton(button: "left" | "right", pressed: boolean): Promise<void>;
   screenshot(format?: "png" | "jpeg"): Promise<{ bytes: Buffer; mime: string }>;
   getStatus(): Promise<BackendStatus>;
   fsRead(dosPath: string): Promise<Buffer>;
