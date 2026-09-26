@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-26
+
 ### Added
 
 - `mouse_button(pressed, button?)` presses or releases a button without moving and leaves it that way, so a drag is press, `move_mouse_relative`, release. Some games act only on a drag: Ultima Underworld II picks an inventory item up with a right-button drag, which no earlier tool could send. A button left down is released at shutdown.
@@ -120,5 +122,6 @@ in and out of a DOS program running under js-dos.
 - No OCR / screen-text extraction.
 - No audio capture.
 
+[0.3.0]: https://github.com/abedegno/dos-mcp/releases/tag/v0.3.0
 [0.2.0]: https://github.com/abedegno/dos-mcp/releases/tag/v0.2.0
 [0.1.0]: https://github.com/abedegno/dos-mcp/releases/tag/v0.1.0
