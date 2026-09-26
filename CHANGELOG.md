@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `mouse_button(pressed, button?)` presses or releases a button without moving and leaves it that way, so a drag is press, `move_mouse_relative`, release. Some games act only on a drag: Ultima Underworld II picks an inventory item up with a right-button drag, which no earlier tool could send. A button left down is released at shutdown.
+- Pointer lock in attended sessions. Clicking the game captures the mouse and sends raw relative movement, scaled to the game's resolution, with each click held for at least 150ms. Games that read relative motion and keep their own cursor, such as Ultima Underworld, lagged behind the real mouse through the absolute bridge. Headless sessions are unchanged.
+
 ## [0.2.0] - 2026-09-20
 
 ### Added

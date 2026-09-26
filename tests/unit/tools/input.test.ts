@@ -7,6 +7,7 @@ import {
   moveMouseTool,
   moveMouseRelativeTool,
   clickAtCursorTool,
+  mouseButtonTool,
 } from "../../../src/tools/input";
 
 describe("input tools", () => {
@@ -78,5 +79,23 @@ describe("input tools", () => {
     await expect(clickAtCursorTool.handler(be, { hold_ms: NaN })).rejects.toThrow();
     await expect(clickAtCursorTool.handler(be, { hold_ms: -1 })).rejects.toThrow();
     expect(be.recordedCursorClicks).toEqual([]);
+  });
+
+  it("mouse_button presses and releases, defaulting to the left button", async () => {
+    await mouseButtonTool.handler(be, { pressed: true, button: "right" });
+    await mouseButtonTool.handler(be, { pressed: false, button: "right" });
+    await mouseButtonTool.handler(be, { pressed: true });
+    expect(be.recordedButtonStates).toEqual([
+      { button: "right", pressed: true },
+      { button: "right", pressed: false },
+      { button: "left", pressed: true },
+    ]);
+  });
+
+  it("mouse_button rejects a missing state or an unknown button", async () => {
+    await expect(mouseButtonTool.handler(be, {})).rejects.toThrow();
+    await expect(mouseButtonTool.handler(be, { pressed: "yes" })).rejects.toThrow();
+    await expect(mouseButtonTool.handler(be, { pressed: true, button: "middle" })).rejects.toThrow();
+    expect(be.recordedButtonStates).toEqual([]);
   });
 });

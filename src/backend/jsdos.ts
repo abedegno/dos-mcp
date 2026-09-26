@@ -247,6 +247,11 @@ export function shiftedBaseKey(ch: string): string | null {
 
 export interface JsDosBackendOptions {
   headless: boolean;
+  /**
+   * Let a person capture the mouse by clicking the game (pointer lock). Defaults to
+   * on when the window is visible and off when headless. See the page's mouse bridge.
+   */
+  pointerLock?: boolean;
 }
 
 /**
@@ -420,6 +425,9 @@ export class JsDosBackend implements Backend {
 
     const pageUrl = new URL("/jsdos-page.html", this.staticServer.origin);
     pageUrl.searchParams.set("jsdos", "/jsdos/");
+    if (this.opts.pointerLock ?? !this.opts.headless) {
+      pageUrl.searchParams.set("pointerlock", "1");
+    }
     await this.page.goto(pageUrl.toString());
 
     // Wait until emulators.js has loaded and the load-event handler has set
@@ -706,6 +714,29 @@ export class JsDosBackend implements Backend {
     return run;
   }
 
+
+  async setMouseButton(button: "left" | "right", pressed: boolean): Promise<void> {
+    if (!this.page) throw new Error("not loaded");
+    const b = button === "right" ? 1 : 0;
+    // Queued behind any click in progress, for the same reason clicks are serialised:
+    // interleaved press and release messages make no sense to the guest.
+    const run = this.clickChain.then(async () => {
+      await this.page!.evaluate(
+        (btn: number, down: boolean) => {
+          const ci = (window as any).__dosmcp?.ci;
+          if (!ci) throw new Error("emulator not started");
+          ci.sendMouseButton(btn, down);
+        },
+        b,
+        pressed
+      );
+      // Tracked so shutdown can release a button a drag left down.
+      if (pressed) this.buttonsDown.add(b);
+      else this.buttonsDown.delete(b);
+    });
+    this.clickChain = run.catch(() => undefined);
+    return run;
+  }
 
   async screenshot(format: "png" | "jpeg" = "png"): Promise<{ bytes: Buffer; mime: string }> {
     if (!this.page) throw new Error("not loaded");

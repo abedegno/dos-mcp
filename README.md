@@ -10,7 +10,7 @@ Built for reverse-engineering and retro-porting work, where the AI needs to inte
 
 ## Status
 
-**21 tools**, covering session control, input, observation, the virtual DOS filesystem, and read-only access to guest memory. Usable today.
+**22 tools**, covering session control, input, observation, the virtual DOS filesystem, and read-only access to guest memory. Usable today.
 
 `read_memory` and `search_memory` landed in 0.2.0, which was the feature that motivated the project: byte-level inspection of a running DOS program. Save-state snapshot and restore is the main thing still missing. Breakpoints and stepping remain speculative.
 
@@ -67,6 +67,8 @@ Install above shows the basic config. For an attended session where you can watc
 }
 ```
 
+In an attended session you can also play. Click the game to capture the mouse; the game then gets raw relative movement, which keeps the cursor in step for games that track the mouse themselves, such as Ultima Underworld. Press Esc to release it.
+
 Restart your client. The AI will see the tools below in its tool list.
 
 ## Tools
@@ -89,6 +91,7 @@ Restart your client. The AI will see the tools below in its tool list.
 | `move_mouse(x, y)` | Move the cursor without clicking. |
 | `move_mouse_relative(dx, dy)` | Move by a relative delta. Needed for games that track the cursor from INT 33h deltas rather than reading the absolute position, which includes Ultima Underworld. |
 | `click_at_cursor(button?, hold_ms?)` | Press and release where the cursor already is, holding for `hold_ms` (default 120) so a slow-polling guest sees it. |
+| `mouse_button(pressed, button?)` | Press or release a button and leave it that way, for drags with `move_mouse_relative` in between. A button left down is released at shutdown. |
 
 ### Observation
 
